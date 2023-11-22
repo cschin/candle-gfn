@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
+use candle_core::Device;
+
 use crate::state::{StateCollection, StateIdType};
 use crate::trajectory::Trajectory;
 
@@ -9,11 +11,13 @@ pub trait MDPTrait<I, S> {
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
+        device: &Device
     ) -> Option<Vec<I>>;
     fn mdp_next_one_uniform(
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
+        device: &Device
     ) -> Option<I>;
 }
 
@@ -29,6 +33,7 @@ pub trait Sampling<I: Copy, S, M> {
         collection: &mut StateCollection<I, S>,
         mdp: &mut MDP<I, S>,
         model: Option<&M>,
+        device: &Device
     ) -> Trajectory<I>;
 
     fn sample_trajectories(
@@ -37,6 +42,7 @@ pub trait Sampling<I: Copy, S, M> {
         collection: &mut StateCollection<I, S>,
         mdp: &mut MDP<I, S>,
         mode: Option<&M>,
+        device: &Device,
         number_trajectories: usize,
     );
 }

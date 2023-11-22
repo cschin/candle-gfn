@@ -14,14 +14,13 @@ pub struct SimpleGridModel<'a> {
     ln2: Linear,
     pub varmap: VarMap,
     pub vb: VarBuilder<'a>,
-    pub device: Device,
+    pub device: &'a Device,
 }
 
 impl<'a> SimpleGridModel<'a> {
-    pub fn new() -> Result<Self> {
+    pub fn new(device: &'a Device) -> Result<Self> {
         let varmap = VarMap::new();
-        let device = Device::new_cuda(0).expect("no cuda device available");
-        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+        let vb = VarBuilder::from_varmap(&varmap, DType::F32, device);
         let ln1 = candle_nn::linear(4, 100, vb.pp("ln1"))?;
         let ln2 = candle_nn::linear(100, 1, vb.pp("ln2"))?;
         Ok(Self {
@@ -36,18 +35,20 @@ impl<'a> SimpleGridModel<'a> {
 
 impl<'a> ModelTrait for SimpleGridModel<'a> {
     fn forward_ssp(&self, source: &impl StateTrait, sink: &impl StateTrait) -> Result<Tensor> {
-        let input1 = source.get_tensor()?;
-        let input2 = sink.get_tensor()?;
+        let input1 = source.get_tensor()?.detach().unwrap();
+        let input2 = sink.get_tensor()?.detach().unwrap();
         let inputs = Tensor::stack(&[&Tensor::cat(&[&input1, &input2], 0)?], 0)?;
+        let inputs = inputs.detach().unwrap();
         let xs = self.ln1.forward(&inputs)?;
         let xs = xs.relu()?;
         let xs = self.ln2.forward(&xs)?;
         Ok(xs)
     }
     fn reverse_ssp(&self, source: &impl StateTrait, sink: &impl StateTrait) -> Result<Tensor> {
-        let input1 = source.get_tensor()?;
-        let input2 = sink.get_tensor()?;
+        let input1 = source.get_tensor()?.detach().unwrap();
+        let input2 = sink.get_tensor()?.detach().unwrap();
         let inputs = Tensor::stack(&[&Tensor::cat(&[&input1, &input2], 0)?], 0)?;
+        let inputs = inputs.detach().unwrap();
         let xs = self.ln1.forward(&inputs)?;
         let xs = xs.relu()?;
         let xs = self.ln2.forward(&xs)?;
@@ -58,10 +59,10 @@ impl<'a> ModelTrait for SimpleGridModel<'a> {
 pub type SimpleGridState = State<(u32, u32)>;
 
 impl SimpleGridState {
-    pub fn new(id: StateIdType, coordinate: (u32, u32), is_terminal: bool, reward: f32) -> Self {
-        let device = Device::new_cuda(0).expect("no cuda device available");
+    pub fn new(id: StateIdType, coordinate: (u32, u32), is_terminal: bool, reward: f32, device: &Device) -> Self {
+        
         let data = [coordinate.0 as f32, coordinate.1 as f32];
-        let tensor = Tensor::new(&data, &device).expect("create tensor fail");
+        let tensor = Tensor::new(&data, device).expect("create tensor fail");
         Self {
             id,
             data: coordinate,
@@ -125,11 +126,12 @@ impl MDPTrait<StateIdType, SimpleGridState> for SimpleGridMDP {
         &self,
         state_id: StateIdType,
         collection: &mut SimpleGridStateCollection,
+        device: &Device
     ) -> Option<Vec<StateIdType>> {
         let state = collection.map.get(&state_id).expect("can get the stat");
         let coordinate = state.data;
-        let max_x = 32u32;
-        let max_y = 32u32;
+        let max_x = 64u32;
+        let max_y = 64u32;
         let mut next_delta: Vec<(u32, u32)> = Vec::new();
         let mut next_states = Vec::<StateIdType>::new();
         if coordinate.0 < max_x {
@@ -144,7 +146,7 @@ impl MDPTrait<StateIdType, SimpleGridState> for SimpleGridMDP {
             if collection.map.contains_key(&id) {
                 next_states.push(id);
             } else {
-                let new_state = Box::new(SimpleGridState::new(id, (x, y), false, 0.0));
+                let new_state = Box::new(SimpleGridState::new(id, (x, y), false, 0.0, device));
                 collection.map.entry(id).or_insert(new_state);
                 next_states.push(id);
             }
@@ -156,11 +158,12 @@ impl MDPTrait<StateIdType, SimpleGridState> for SimpleGridMDP {
         &self,
         state_id: StateIdType,
         collection: &mut SimpleGridStateCollection,
+        device: &Device
     ) -> Option<StateIdType> {
         let state = collection.map.get(&state_id).expect("can get the stat");
         let coordinate = state.data;
-        let max_x = 32u32;
-        let max_y = 32u32;
+        let max_x = 64u32;
+        let max_y = 64u32;
         let mut next_delta: Vec<(u32, u32)> = Vec::new();
         if coordinate.0 < max_x {
             next_delta.push((1, 0));
@@ -178,7 +181,7 @@ impl MDPTrait<StateIdType, SimpleGridState> for SimpleGridMDP {
         if let Some((x, y)) = next_coordinate {
             let id = x * max_x + y;
             if !collection.map.contains_key(&id) {
-                let new_state = Box::new(SimpleGridState::new(id, (x, y), false, 0.0));
+                let new_state = Box::new(SimpleGridState::new(id, (x, y), false, 0.0, device));
                 collection.map.entry(id).or_insert(new_state);
             }
             Some(id)
@@ -197,13 +200,14 @@ impl Sampling<StateIdType, SimpleGridState, SimpleGridModel<'_>> for SimpleGridS
         collection: &mut SimpleGridStateCollection,
         mdp: &mut SimpleGridMDP,
         model: Option<&SimpleGridModel>,
+        device: &Device
     ) -> Trajectory<StateIdType> {
         let mut traj = Trajectory::new();
         let mut state_id = begin;
         let model = model.unwrap();
         let epsilon: f32 = 0.05;
         let mut rng = rand::thread_rng();
-        while let Some(next_states) = mdp.mdp_next_possible_states(state_id, collection) {
+        while let Some(next_states) = mdp.mdp_next_possible_states(state_id, collection, device) {
             let scores = next_states
                 .into_iter()
                 .map(|sid| {
@@ -264,10 +268,11 @@ impl Sampling<StateIdType, SimpleGridState, SimpleGridModel<'_>> for SimpleGridS
         collection: &mut SimpleGridStateCollection,
         mdp: &mut SimpleGridMDP,
         model: Option<&SimpleGridModel>,
+        device: &Device,
         number_trajectories: usize,
     ) {
         (0..number_trajectories).for_each(|_| {
-            let trajectory = self.sample_a_new_trajectory(begin, collection, mdp, model);
+            let trajectory = self.sample_a_new_trajectory(begin, collection, mdp, model, device);
             trajectory
                 .get_parent_offspring_pairs()
                 .iter()
