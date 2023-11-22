@@ -1,0 +1,3 @@
+[workspace]
+members = ["candle-gfn", "candle-gfn-bin"]
+resolver = "2"
