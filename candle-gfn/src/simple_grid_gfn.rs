@@ -1,7 +1,5 @@
-use std::marker::PhantomData;
-
 use crate::model::ModelTrait;
-use crate::sampler::{MDPTrait, Sampler, Sampling, MDP};
+use crate::sampler::{MDPTrait, Sampler, Sampling, MDP, SamplingConfiguration};
 use crate::state::{State, StateCollection, StateIdType, StateTrait};
 use crate::trajectory::Trajectory;
 use anyhow::Result;
@@ -59,8 +57,13 @@ impl<'a> ModelTrait for SimpleGridModel<'a> {
 pub type SimpleGridState = State<(u32, u32)>;
 
 impl SimpleGridState {
-    pub fn new(id: StateIdType, coordinate: (u32, u32), is_terminal: bool, reward: f32, device: &Device) -> Self {
-        
+    pub fn new(
+        id: StateIdType,
+        coordinate: (u32, u32),
+        is_terminal: bool,
+        reward: f32,
+        device: &Device,
+    ) -> Self {
         let data = [coordinate.0 as f32, coordinate.1 as f32];
         let tensor = Tensor::new(&data, device).expect("create tensor fail");
         Self {
@@ -106,32 +109,25 @@ impl StateTrait for SimpleGridState {
 pub type SimpleGridStateCollection = StateCollection<StateIdType, SimpleGridState>;
 
 pub type SimpleGridMDP = MDP<StateIdType, SimpleGridState>;
-impl SimpleGridMDP {
-    pub fn new() -> Self {
-        Self {
-            phantom0: PhantomData,
-            phantom1: PhantomData,
-        }
-    }
+
+pub struct SimpleGridParameters {
+    pub max_x: u32,
+    pub max_y: u32,
+    pub number_trajectories: u32,
 }
 
-impl Default for SimpleGridMDP {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MDPTrait<StateIdType, SimpleGridState> for SimpleGridMDP {
+impl MDPTrait<StateIdType, SimpleGridState, Device, SimpleGridParameters> for SimpleGridMDP {
     fn mdp_next_possible_states(
         &self,
         state_id: StateIdType,
         collection: &mut SimpleGridStateCollection,
-        device: &Device
+        device: &Device,
+        parameters: &SimpleGridParameters,
     ) -> Option<Vec<StateIdType>> {
         let state = collection.map.get(&state_id).expect("can get the stat");
         let coordinate = state.data;
-        let max_x = 64u32;
-        let max_y = 64u32;
+        let max_x = parameters.max_x;
+        let max_y = parameters.max_y;
         let mut next_delta: Vec<(u32, u32)> = Vec::new();
         let mut next_states = Vec::<StateIdType>::new();
         if coordinate.0 < max_x {
@@ -151,63 +147,54 @@ impl MDPTrait<StateIdType, SimpleGridState> for SimpleGridMDP {
                 next_states.push(id);
             }
         });
-        Some(next_states)
+        if next_states.is_empty() {
+            None
+        } else {
+            Some(next_states)
+        }
     }
 
     fn mdp_next_one_uniform(
         &self,
         state_id: StateIdType,
         collection: &mut SimpleGridStateCollection,
-        device: &Device
+        device: &Device,
+        parameters: &SimpleGridParameters,
     ) -> Option<StateIdType> {
-        let state = collection.map.get(&state_id).expect("can get the stat");
-        let coordinate = state.data;
-        let max_x = 64u32;
-        let max_y = 64u32;
-        let mut next_delta: Vec<(u32, u32)> = Vec::new();
-        if coordinate.0 < max_x {
-            next_delta.push((1, 0));
-        }
-        if coordinate.1 < max_y {
-            next_delta.push((0, 1));
-        }
-        let next_coordinate = if next_delta.is_empty() {
-            None
-        } else {
-            let mut rng = rand::thread_rng();
-            let d = next_delta[rng.gen::<usize>().rem_euclid(next_delta.len())];
-            Some((coordinate.0 + d.0, coordinate.1 + d.1))
-        };
-        if let Some((x, y)) = next_coordinate {
-            let id = x * max_x + y;
-            if !collection.map.contains_key(&id) {
-                let new_state = Box::new(SimpleGridState::new(id, (x, y), false, 0.0, device));
-                collection.map.entry(id).or_insert(new_state);
-            }
-            Some(id)
-        } else {
-            None
-        }
+        let mut rng = rand::thread_rng();
+        self.mdp_next_possible_states(state_id, collection, device, parameters)
+            .map(|states| states[rng.gen::<usize>().rem_euclid(states.len())])
     }
 }
 
 pub type SimpleGridSampler = Sampler<StateIdType>;
+pub type SimpleGridSamplingConfiguration<'a> = SamplingConfiguration<'a, StateIdType, SimpleGridState, SimpleGridModel<'a>, SimpleGridParameters>;
 
-impl Sampling<StateIdType, SimpleGridState, SimpleGridModel<'_>> for SimpleGridSampler {
-    fn sample_a_new_trajectory<'a>(
+
+impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>>
+    for SimpleGridSampler
+{
+    fn sample_a_new_trajectory(
         &mut self,
-        begin: StateIdType,
-        collection: &mut SimpleGridStateCollection,
-        mdp: &mut SimpleGridMDP,
-        model: Option<&SimpleGridModel>,
-        device: &Device
+        config: &mut SimpleGridSamplingConfiguration
     ) -> Trajectory<StateIdType> {
+
+        let begin = config.begin;
+        let collection = &mut config.collection;
+        let model = config.model;
+        let mdp = &mut config.mdp;
+        let device = config.device;
+        let parameters = config.parameters;     
+
         let mut traj = Trajectory::new();
         let mut state_id = begin;
         let model = model.unwrap();
         let epsilon: f32 = 0.05;
         let mut rng = rand::thread_rng();
-        while let Some(next_states) = mdp.mdp_next_possible_states(state_id, collection, device) {
+
+        while let Some(next_states) =
+            mdp.mdp_next_possible_states(state_id, collection, device, parameters)
+        {
             let scores = next_states
                 .into_iter()
                 .map(|sid| {
@@ -252,27 +239,17 @@ impl Sampling<StateIdType, SimpleGridState, SimpleGridModel<'_>> for SimpleGridS
                 traj.push(state_id);
             }
         }
-
-        // while let Some(s) = mdp.mdp_next_one_uniform(state_id, collection) {
-        //     // println!("state_id: {:?}", s);
-        //     state_id = s;
-        //     traj.push(state_id);
-        // }
-
         traj
     }
 
     fn sample_trajectories(
         &mut self,
-        begin: StateIdType,
-        collection: &mut SimpleGridStateCollection,
-        mdp: &mut SimpleGridMDP,
-        model: Option<&SimpleGridModel>,
-        device: &Device,
-        number_trajectories: usize,
+        config: &mut SimpleGridSamplingConfiguration
     ) {
+        let number_trajectories = config.parameters.number_trajectories;
         (0..number_trajectories).for_each(|_| {
-            let trajectory = self.sample_a_new_trajectory(begin, collection, mdp, model, device);
+            let trajectory =
+                self.sample_a_new_trajectory(config);
             trajectory
                 .get_parent_offspring_pairs()
                 .iter()

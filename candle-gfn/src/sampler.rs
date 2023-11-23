@@ -6,44 +6,60 @@ use candle_core::Device;
 use crate::state::{StateCollection, StateIdType};
 use crate::trajectory::Trajectory;
 
-pub trait MDPTrait<I, S> {
+pub trait MDPTrait<I, S, D, P> {
     fn mdp_next_possible_states(
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
-        device: &Device
+        device: &D,
+        parameters: &P,
     ) -> Option<Vec<I>>;
     fn mdp_next_one_uniform(
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
-        device: &Device
+        device: &D,
+        parameters: &P,
     ) -> Option<I>;
 }
 
 pub struct MDP<I, S> {
-    pub phantom0: PhantomData<I>,
-    pub phantom1: PhantomData<S>,
+    pub _state_id: PhantomData<I>,
+    pub _state: PhantomData<S>,
 }
 
-pub trait Sampling<I: Copy, S, M> {
+impl<I, S> MDP<I, S> {
+    pub fn new() -> Self {
+        Self {
+            _state_id: PhantomData,
+            _state: PhantomData,
+        }
+    }
+}
+
+impl<I, S> Default for MDP<I, S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+pub struct SamplingConfiguration<'a, I: Copy, S, M, P> {
+    pub begin: StateIdType,
+    pub collection: &'a mut StateCollection<I, S>,
+    pub mdp: &'a mut MDP<I, S>,
+    pub model: Option<&'a M>,
+    pub device: &'a Device,
+    pub parameters: &'a P,
+}
+pub trait Sampling<I:Copy, C> {
     fn sample_a_new_trajectory(
         &mut self,
-        begin: StateIdType,
-        collection: &mut StateCollection<I, S>,
-        mdp: &mut MDP<I, S>,
-        model: Option<&M>,
-        device: &Device
+        config: &mut C 
+
     ) -> Trajectory<I>;
 
     fn sample_trajectories(
         &mut self,
-        begin: StateIdType,
-        collection: &mut StateCollection<I, S>,
-        mdp: &mut MDP<I, S>,
-        mode: Option<&M>,
-        device: &Device,
-        number_trajectories: usize,
+        config: &mut C
     );
 }
 
