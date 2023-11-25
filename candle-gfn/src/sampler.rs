@@ -21,6 +21,21 @@ pub trait MDPTrait<I, S, D, P> {
         device: &D,
         parameters: &P,
     ) -> Option<I>;
+    fn mdp_previous_possible_states(
+        &self,
+        state_id: I,
+        collection: &mut StateCollection<I, S>,
+        device: &D,
+        parameters: &P,
+    ) -> Option<Vec<I>>;
+    fn mdp_previous_one_uniform(
+        &self,
+        state_id: I,
+        collection: &mut StateCollection<I, S>,
+        device: &D,
+        parameters: &P,
+    ) -> Option<I>;
+
 }
 
 pub struct MDP<I, S> {

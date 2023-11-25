@@ -5,19 +5,20 @@ use fxhash::FxHashMap;
 
 pub type StateIdType = u32;
 
-pub trait StateTrait {
+pub trait StateTrait<T> {
     fn get_id(&self) -> StateIdType;
     fn get_tensor(&self) -> Result<&Tensor>;
     fn get_forward_score(
         &self,
-        next_state: &impl StateTrait,
-        model: &impl ModelTrait,
+        next_state: &impl StateTrait<T>,
+        model: &impl ModelTrait<T>,
     ) -> Result<Tensor>;
     fn get_previous_score(
         &self,
-        previous_state: &impl StateTrait,
-        model: &impl ModelTrait,
+        previous_state: &impl StateTrait<T>,
+        model: &impl ModelTrait<T>,
     ) -> Result<Tensor>;
+    fn get_data(&self) -> T;
 }
 
 pub struct State<T> {
