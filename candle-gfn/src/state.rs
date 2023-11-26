@@ -8,12 +8,12 @@ pub type StateIdType = u32;
 pub trait StateTrait<T> {
     fn get_id(&self) -> StateIdType;
     fn get_tensor(&self) -> Result<&Tensor>;
-    fn get_forward_score(
+    fn get_forward_flow(
         &self,
         next_state: &impl StateTrait<T>,
         model: &impl ModelTrait<T>,
     ) -> Result<Tensor>;
-    fn get_previous_score(
+    fn get_previous_flow(
         &self,
         previous_state: &impl StateTrait<T>,
         model: &impl ModelTrait<T>,

@@ -4,7 +4,8 @@ use crate::state::{State, StateCollection, StateIdType, StateTrait};
 use crate::trajectory::Trajectory;
 use anyhow::{anyhow, Result};
 use candle_core::{DType, Device, Tensor};
-use candle_nn::{Linear, Module, VarBuilder, VarMap};
+use candle_nn::ops;
+use candle_nn::{Linear, Module, VarBuilder, VarMap, ops::softmax_last_dim};
 use fxhash::FxHashMap;
 use rand::{self, Rng};
 
@@ -18,7 +19,6 @@ pub struct SimpleGridParameters {
 }
 
 pub struct SimpleGridModel<'a, P> {
-    logz: Tensor,
     ln1: Linear,
     ln2: Linear,
     pub varmap: VarMap,
@@ -31,13 +31,11 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters> {
         let varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&varmap, DType::F32, device);
         let in_d: usize = (parameter.max_x * parameter.max_y * 2) as usize;
-        let out_d = 1_usize; // a simple score of log p
+        let out_d = 2_usize; // a simple score of log p
         let ln1 = candle_nn::linear(in_d, 100, vb.pp("ln1"))?;
         let ln2 = candle_nn::linear(100, out_d, vb.pp("ln2"))?;
-        let logz = vb.get(1, "logz")?;
         //println!("all vars: {:?}", varmap.data());
         Ok(Self {
-            logz,
             ln1,
             ln2,
             varmap,
@@ -48,7 +46,7 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters> {
 }
 
 impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters> {
-    fn forward_ssp(
+    fn forward_ss_flow(
         &self,
         source: &impl StateTrait<(u32, u32)>,
         sink: &impl StateTrait<(u32, u32)>,
@@ -59,22 +57,15 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters> {
         let xs = self.ln1.forward(&inputs)?;
         let xs = xs.relu()?;
         let xs = self.ln2.forward(&xs)?;
+        let xs = ops::leaky_relu(&xs, 0.01)?;
         Ok(xs)
     }
-    fn reverse_ssp(
+    fn reverse_ss_flow(
         &self,
         source: &impl StateTrait<(u32, u32)>,
         sink: &impl StateTrait<(u32, u32)>,
     ) -> Result<Tensor> {
-        let coordinate0 = source.get_data();
-        let coordinate1 = sink.get_data();
-        let d0 = coordinate1.0 - coordinate0.0;
-        let d1 = coordinate1.1 - coordinate0.1;
-        if d0 == 0 && d1 == 1 || d0 == 1 && d1 == 0 {
-            Ok(Tensor::from_slice(&[1_f32; 1], 1, self.device).unwrap())
-        } else {
-            Err(anyhow!("fail to get tensor in reverse_ssp()"))
-        }
+        todo!()
     }
 }
 
@@ -116,20 +107,20 @@ impl StateTrait<(u32, u32)> for SimpleGridState {
         Ok(&self.tensor)
     }
 
-    fn get_forward_score(
+    fn get_forward_flow(
         &self,
         next_state: &impl StateTrait<(u32, u32)>,
         model: &impl ModelTrait<(u32, u32)>,
     ) -> Result<Tensor> {
-        model.forward_ssp(self, next_state)
+        model.forward_ss_flow(self, next_state)
     }
 
-    fn get_previous_score(
+    fn get_previous_flow(
         &self,
         previous_state: &impl StateTrait<(u32, u32)>,
         model: &impl ModelTrait<(u32, u32)>,
     ) -> Result<Tensor> {
-        model.forward_ssp(previous_state, self)
+        model.forward_ss_flow(previous_state, self)
     }
 
     fn get_data(&self) -> (u32, u32) {
@@ -278,25 +269,20 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
         let mut traj = Trajectory::new();
         let mut state_id = begin;
         let model = model.unwrap();
-        let epsilon: f32 = 0.05;
         let mut rng = rand::thread_rng();
 
         while let Some(next_states) =
             mdp.mdp_next_possible_states(state_id, collection, device, parameters)
         {
-            let scores = next_states
+            let state_and_flow = next_states
                 .into_iter()
                 .map(|sid| {
                     let s0 = collection.map.get(&state_id).unwrap().as_ref();
                     let s1 = collection.map.get(&sid).unwrap().as_ref();
                     let p = model
-                        .forward_ssp(s0, s1)
+                        .forward_ss_flow(s0, s1)
                         .unwrap()
-                        .neg()
-                        .unwrap()
-                        .exp()
-                        .unwrap()
-                        .squeeze(0)
+                        .flatten_all()
                         .unwrap()
                         .get(0)
                         .unwrap();
@@ -304,14 +290,16 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                     (sid, p.to_scalar::<f32>().unwrap())
                 })
                 .collect::<Vec<_>>();
-            if scores.is_empty() {
+            if state_and_flow.is_empty() {
                 break;
             };
-            let sump: f32 = scores.iter().map(|v| v.1).sum();
+            let inv_temp: f32= 0.1;
+            let sump: f32 = state_and_flow.iter().map(|v| (-inv_temp * v.1).exp()).sum();
             let mut acc_sump = Vec::new();
-            scores
+            //let epsilon: f32 = 0.05;
+            state_and_flow
                 .iter()
-                .for_each(|(id, p)| acc_sump.push((*id, (1.0 - epsilon) * p / sump)));
+                .for_each(|(id, p)| acc_sump.push((*id, (-inv_temp * p).exp() / sump )));
             let t = rng.gen::<f32>();
             let mut updated = false;
             for (id, th) in acc_sump {
@@ -323,9 +311,13 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                 }
             }
             if !updated {
-                let d = scores[rng.gen::<usize>().rem_euclid(scores.len())];
+                let d = state_and_flow[rng.gen::<usize>().rem_euclid(state_and_flow.len())];
                 state_id = d.0;
                 traj.push(state_id);
+                if collection.map.get(&state_id).unwrap().as_ref().is_terminal {
+                    // println!("terminal node: {}", state_id);
+                    break
+                }
             }
         }
         traj

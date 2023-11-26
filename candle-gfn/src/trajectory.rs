@@ -1,6 +1,6 @@
 
 pub struct Trajectory<I: Copy> {
-    trajectory: Vec<I>,
+    pub trajectory: Vec<I>,
 }
 
 impl<I: Copy> Default for Trajectory<I> {
