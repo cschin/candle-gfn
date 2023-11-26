@@ -2,10 +2,10 @@ use crate::model::ModelTrait;
 use crate::sampler::{MDPTrait, Sampler, Sampling, SamplingConfiguration, MDP};
 use crate::state::{State, StateCollection, StateIdType, StateTrait};
 use crate::trajectory::Trajectory;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::ops;
-use candle_nn::{Linear, Module, VarBuilder, VarMap, ops::softmax_last_dim};
+use candle_nn::{Linear, Module, VarBuilder, VarMap};
 use fxhash::FxHashMap;
 use rand::{self, Rng};
 

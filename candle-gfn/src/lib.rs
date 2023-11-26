@@ -7,9 +7,7 @@ pub mod trajectory;
 #[cfg(test)]
 mod tests {
 
-    
-
-    use candle_core::{DType, Tensor};
+    use candle_core::{shape, DType, Tensor};
     use fxhash::FxHashMap;
 
     use crate::sampler::{MDPTrait, Sampling};
@@ -178,9 +176,7 @@ mod tests {
 
                         let out_flow = Tensor::stack(&out_flow[..], 0).unwrap();
                         let out_flow = out_flow
-                            .flatten_all()
-                            .unwrap()
-                            .sum(0)
+                            .sum_all()
                             .unwrap()
                             .log()
                             .unwrap();
@@ -209,9 +205,7 @@ mod tests {
 
                         let in_flow = Tensor::stack(&in_flow[..], 0).unwrap();
                         let in_flow = in_flow
-                            .flatten_all()
-                            .unwrap()
-                            .sum(0)
+                            .sum_all()
                             .unwrap()
                             .log()
                             .unwrap();
@@ -256,16 +250,14 @@ mod tests {
 
                 let in_flow = Tensor::stack(&in_flow[..], 0).unwrap();
                 let in_flow = in_flow
-                    .flatten_all()
-                    .unwrap()
-                    .sum(0)
+                    .sum_all()
                     .unwrap()
                     .log()
                     .unwrap();
 
-                let reward = Tensor::from_slice(&[reward; 1], (1,), device)
-                    .unwrap()
-                    .squeeze(0)
+                let r = Tensor::from_slice(&[1.0f32; 1], shape::SCALAR, device);
+
+                let reward = Tensor::from_slice(&[reward; 1], shape::SCALAR, device)
                     .unwrap()
                     .log()
                     .unwrap();
@@ -277,9 +269,7 @@ mod tests {
 
             let losses = Tensor::stack(&losses[..], 0)
                 .unwrap()
-                .flatten_all()
-                .unwrap()
-                .sum(0)
+                .sum_all()
                 .unwrap();
             opt.backward_step(&losses);
             println!("batch {}, total loss: {}", i, losses);
@@ -289,8 +279,8 @@ mod tests {
         (0..63).for_each(|x| {
             (0..63).for_each(|y| {
                 if x < 63 {
-                    let s0id = (x * parameters.max_x + y);
-                    let s1id = ((x + 1) * parameters.max_x + y);
+                    let s0id = x * parameters.max_x + y;
+                    let s1id = (x + 1) * parameters.max_x + y;
 
                     if !config.collection.map.contains_key(&s0id)
                         || !config.collection.map.contains_key(&s1id)
@@ -303,17 +293,17 @@ mod tests {
                     let out0 = model.forward_ss_flow(s0, s1).unwrap();
                     // println!("out: {}", out0);
                     let out0: f32 = out0
-                        .squeeze(0)
+                        .squeeze(1)
                         .unwrap()
-                        .get(0)
+                        .squeeze(0)
                         .unwrap()
                         .to_scalar()
                         .unwrap();
                     println!("{} {} -> {} {} : {}", x, y, x + 1, y, out0);
                 }
                 if y < 63 {
-                    let s0id = (x * parameters.max_x + y);
-                    let s1id = (x * parameters.max_x + y + 1);
+                    let s0id = x * parameters.max_x + y;
+                    let s1id = x * parameters.max_x + y + 1;
 
                     if !config.collection.map.contains_key(&s0id)
                         || !config.collection.map.contains_key(&s1id)
@@ -326,9 +316,9 @@ mod tests {
                     let out0: f32 = model
                         .forward_ss_flow(s0, s1)
                         .unwrap()
-                        .squeeze(0)
+                        .squeeze(1)
                         .unwrap()
-                        .get(0)
+                        .squeeze(0) 
                         .unwrap()
                         .to_scalar()
                         .unwrap();
