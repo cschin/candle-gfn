@@ -305,7 +305,7 @@ mod tests {
                             .unwrap();
                         println!("F\t{}\t{}\t{}\t{}\t{}\t{}", i, x, y, x + 1, y, out0);
                     }
-                    if y < parameters.max_y {
+                    if y < parameters.max_y - 1{
                         let s0id = x * parameters.max_x + y;
                         let s1id = x * parameters.max_x + y + 1;
 
