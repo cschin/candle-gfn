@@ -18,9 +18,10 @@ pub struct SimpleGridParameters {
 }
 
 pub struct SimpleGridModel<'a, P> {
-    ln1: Linear,
-    ln2: Linear,
+    //ln1: Linear,
+    //ln2: Linear,
     f0: Tensor,
+    values: Tensor,
     pub varmap: VarMap,
     pub device: &'a Device,
     parameter: P,
@@ -32,16 +33,24 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters> {
         let vb = VarBuilder::from_varmap(&varmap, DType::F32, device);
         let in_d: usize = (parameter.max_x * parameter.max_y * 2) as usize;
         let out_d = 1_usize; // a simple score of log p
-        let ln1 = candle_nn::linear(in_d, 64, vb.pp("ln1"))?;
-        let ln2 = candle_nn::linear(64, out_d, vb.pp("ln2"))?;
+                             //let ln1 = candle_nn::linear(in_d, 128, vb.pp("ln1"))?;
+                             //let ln2 = candle_nn::linear(128, out_d, vb.pp("ln2"))?;
         let f0 = vb
             .get_with_hints((1, 1), "f0", candle_nn::Init::Const(0.0))
             .unwrap();
+        let values = vb
+            .get_with_hints(
+                ((parameter.max_x * parameter.max_y * 2) as usize, 1_usize),
+                "values",
+                candle_nn::Init::default(),
+            )
+            .unwrap();
         //println!("all vars: {:?}", varmap.data());
         Ok(Self {
-            ln1,
-            ln2,
+            //ln1,
+            //ln2,
             f0,
+            values,
             varmap,
             device,
             parameter: parameter.clone(),
@@ -55,12 +64,19 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters> {
         source: &impl StateTrait<(u32, u32)>,
         sink: &impl StateTrait<(u32, u32)>,
     ) -> Result<Tensor> {
-        let input1 = source.get_tensor()?;
-        let input2 = sink.get_tensor()?;
-        let inputs = Tensor::stack(&[&Tensor::cat(&[&input1, &input2], 0)?], 0)?.detach()?;
-        let xs = self.ln1.forward(&inputs)?.detach()?;
-        let xs = xs.relu()?;
-        let xs = self.ln2.forward(&xs)?.exp()?;
+        // let input1 = source.get_tensor()?;
+        // let input2 = sink.get_tensor()?;
+        // let inputs = Tensor::stack(&[&Tensor::cat(&[&input1, &input2], 0)?], 0)?.detach()?;
+        // let xs = self.ln1.forward(&inputs)?.detach()?;
+        // let xs = xs.relu()?;
+        // let xs = self.ln2.forward(&xs)?.exp()?;
+        let mut id = source.get_id() << 1;
+        if source.get_data().0 == sink.get_data().1 {
+            id += 1;
+        };
+        let ids = Tensor::new(&[id], self.device)?;
+        let xs = self.values.embedding(&ids)?.exp()?;
+        //println!("DDD {} {}", ids, xs);
         Ok(xs)
     }
     fn get_f0(&self) -> Result<Tensor> {
@@ -301,8 +317,14 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
             if state_and_flow.is_empty() {
                 break;
             };
+
             // let inv_temp: f32 = 5.0;
-            let sump: f32 = state_and_flow.iter().map(|v| v.1).sum();
+            let mut sump: f32 = state_and_flow.iter().map(|v| v.1).sum();
+            let state = collection.map.get(&state_id).unwrap().as_ref();
+            if state.is_terminal {
+                sump += state.reward;
+            }
+
             let mut acc_sump = Vec::new();
             //let epsilon: f32 = 0.05;
             let mut th = 0.0f32;
@@ -310,8 +332,15 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                 th += p / sump;
                 acc_sump.push((*id, th))
             });
-            let t = rng.gen::<f32>();
+            let mut t = rng.gen::<f32>();
             let mut updated = false;
+            if state.is_terminal {
+                if t < state.reward / sump {
+                    break;
+                } else {
+                    t -= state.reward / sump; 
+                }
+            }
             //println!("acc_sump: {:?} {}", acc_sump, t);
             for (id, th) in acc_sump {
                 if t < th {
@@ -325,10 +354,6 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                 let d = state_and_flow[rng.gen::<usize>().rem_euclid(state_and_flow.len())];
                 state_id = d.0;
                 traj.push(state_id);
-            }
-            if collection.map.get(&state_id).unwrap().as_ref().is_terminal {
-                // println!("terminal node: {}", state_id);
-                break;
             }
         }
         //println!("traj: {:?}", traj.trajectory);

@@ -98,9 +98,9 @@ mod tests {
         let state_id = 0_u32;
         let device = &Device::new_cuda(0).expect("no cuda device available");
         let parameters = &SimpleGridParameters {
-            max_x: 16,
-            max_y: 16,
-            number_trajectories: 500,
+            max_x: 12,
+            max_y: 12,
+            number_trajectories: 200,
             terminate_states: vec![],
             rewards: FxHashMap::default(),
         };
@@ -112,7 +112,7 @@ mod tests {
         // let state: SimpleGridState =
         //     SimpleGridState::new(state_id, (2, 12), true, 10.0, device, parameters);
         // collection.map.insert(state_id, Box::new(state));
-        let terminal_states = vec![((6, 14), 5.0), ((12, 5), 2.5), ((13, 9), 6.0)];
+        let terminal_states = vec![((6, 7), 5.0), ((2, 5), 2.5), ((3, 9), 12.0), ((8, 2), 12.0)];
 
         terminal_states.into_iter().for_each(|((x, y), r)| {
             let state_id = x * parameters.max_x + y;
@@ -199,11 +199,6 @@ mod tests {
                                 let s0 = config.collection.map.get(&state_id).unwrap().as_ref();
                                 let s1 =
                                     config.collection.map.get(&next_state_id).unwrap().as_ref();
-                                if s1.data.0 == parameters.max_x - 1
-                                    && s1.data.1 == parameters.max_y - 1
-                                {
-                                    return;
-                                };
                                 let tmp = model.forward_ss_flow(s0, s1).unwrap();
                                 // println!("outflow0: {:?} {:?} {}", s0, s1, tmp);
                                 out_flow.push(tmp);
@@ -305,7 +300,7 @@ mod tests {
                             .unwrap();
                         println!("F\t{}\t{}\t{}\t{}\t{}\t{}", i, x, y, x + 1, y, out0);
                     }
-                    if y < parameters.max_y - 1{
+                    if y < parameters.max_y - 1 {
                         let s0id = x * parameters.max_x + y;
                         let s1id = x * parameters.max_x + y + 1;
 
