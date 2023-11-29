@@ -20,7 +20,7 @@ pub trait StateTrait<T> {
     ) -> Result<Tensor>;
     fn get_data(&self) -> T;
 }
-
+#[derive(Debug)]
 pub struct State<T> {
     pub id: StateIdType,
     pub data: T,

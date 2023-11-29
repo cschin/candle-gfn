@@ -4,7 +4,6 @@ use crate::state::{State, StateCollection, StateIdType, StateTrait};
 use crate::trajectory::Trajectory;
 use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
-use candle_nn::ops;
 use candle_nn::{Linear, Module, VarBuilder, VarMap};
 use fxhash::FxHashMap;
 use rand::{self, Rng};
@@ -21,6 +20,7 @@ pub struct SimpleGridParameters {
 pub struct SimpleGridModel<'a, P> {
     ln1: Linear,
     ln2: Linear,
+    f0: Tensor,
     pub varmap: VarMap,
     pub device: &'a Device,
     parameter: P,
@@ -31,13 +31,17 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters> {
         let varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&varmap, DType::F32, device);
         let in_d: usize = (parameter.max_x * parameter.max_y * 2) as usize;
-        let out_d = 2_usize; // a simple score of log p
-        let ln1 = candle_nn::linear(in_d, 100, vb.pp("ln1"))?;
-        let ln2 = candle_nn::linear(100, out_d, vb.pp("ln2"))?;
+        let out_d = 1_usize; // a simple score of log p
+        let ln1 = candle_nn::linear(in_d, 64, vb.pp("ln1"))?;
+        let ln2 = candle_nn::linear(64, out_d, vb.pp("ln2"))?;
+        let f0 = vb
+            .get_with_hints((1, 1), "f0", candle_nn::Init::Const(0.0))
+            .unwrap();
         //println!("all vars: {:?}", varmap.data());
         Ok(Self {
             ln1,
             ln2,
+            f0,
             varmap,
             device,
             parameter: parameter.clone(),
@@ -54,11 +58,13 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters> {
         let input1 = source.get_tensor()?;
         let input2 = sink.get_tensor()?;
         let inputs = Tensor::stack(&[&Tensor::cat(&[&input1, &input2], 0)?], 0)?.detach()?;
-        let xs = self.ln1.forward(&inputs)?;
+        let xs = self.ln1.forward(&inputs)?.detach()?;
         let xs = xs.relu()?;
-        let xs = self.ln2.forward(&xs)?;
-        let xs = ops::leaky_relu(&xs, 0.01)?;
+        let xs = self.ln2.forward(&xs)?.exp()?;
         Ok(xs)
+    }
+    fn get_f0(&self) -> Result<Tensor> {
+        Ok(self.f0.exp()?)
     }
     fn reverse_ss_flow(
         &self,
@@ -152,6 +158,7 @@ impl MDPTrait<StateIdType, SimpleGridState, Device, SimpleGridParameters> for Si
         if coordinate.1 < max_y - 1 {
             next_delta.push((0, 1));
         }
+        //println!("DBG: {:?} {:?} {} {}", coordinate, next_delta, parameters.max_x, parameters.max_y);
         next_delta.iter().for_each(|d| {
             let (x, y) = (coordinate.0 + d.0, coordinate.1 + d.1);
             let id = x * max_x + y;
@@ -268,6 +275,7 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
 
         let mut traj = Trajectory::new();
         let mut state_id = begin;
+        traj.push(state_id);
         let model = model.unwrap();
         let mut rng = rand::thread_rng();
 
@@ -293,15 +301,18 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
             if state_and_flow.is_empty() {
                 break;
             };
-            let inv_temp: f32= 0.1;
-            let sump: f32 = state_and_flow.iter().map(|v| (-inv_temp * v.1).exp()).sum();
+            // let inv_temp: f32 = 5.0;
+            let sump: f32 = state_and_flow.iter().map(|v| v.1).sum();
             let mut acc_sump = Vec::new();
             //let epsilon: f32 = 0.05;
-            state_and_flow
-                .iter()
-                .for_each(|(id, p)| acc_sump.push((*id, (-inv_temp * p).exp() / sump )));
+            let mut th = 0.0f32;
+            state_and_flow.iter().for_each(|(id, p)| {
+                th += p / sump;
+                acc_sump.push((*id, th))
+            });
             let t = rng.gen::<f32>();
             let mut updated = false;
+            //println!("acc_sump: {:?} {}", acc_sump, t);
             for (id, th) in acc_sump {
                 if t < th {
                     state_id = id;
@@ -314,12 +325,13 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                 let d = state_and_flow[rng.gen::<usize>().rem_euclid(state_and_flow.len())];
                 state_id = d.0;
                 traj.push(state_id);
-                if collection.map.get(&state_id).unwrap().as_ref().is_terminal {
-                    // println!("terminal node: {}", state_id);
-                    break
-                }
+            }
+            if collection.map.get(&state_id).unwrap().as_ref().is_terminal {
+                // println!("terminal node: {}", state_id);
+                break;
             }
         }
+        //println!("traj: {:?}", traj.trajectory);
         traj
     }
 
