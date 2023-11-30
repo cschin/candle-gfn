@@ -48,7 +48,7 @@ mod tests {
         let parameters = &SimpleGridParameters {
             max_x: 64,
             max_y: 64,
-            number_trajectories: 100,
+            number_trajectories: 200,
             terminate_states: vec![],
             rewards: FxHashMap::default(),
         };
@@ -108,19 +108,6 @@ mod tests {
         let collection = &mut SimpleGridStateCollection::default();
         collection.map.insert(state_id, Box::new(state));
 
-        // let state_id = 2 * parameters.max_x + 12;
-        // let state: SimpleGridState =
-        //     SimpleGridState::new(state_id, (2, 12), true, 10.0, device, parameters);
-        // collection.map.insert(state_id, Box::new(state));
-        let terminal_states = vec![((6, 7), 5.0), ((2, 5), 2.5), ((3, 9), 12.0), ((8, 2), 12.0)];
-
-        terminal_states.into_iter().for_each(|((x, y), r)| {
-            let state_id = x * parameters.max_x + y;
-            let state: SimpleGridState =
-                SimpleGridState::new(state_id, (x, y), true, r, device, parameters);
-            collection.map.insert(state_id, Box::new(state));
-        });
-
         (0..parameters.max_x).for_each(|idx| {
             let state_id = idx * parameters.max_x + parameters.max_y - 1;
             let state: SimpleGridState = SimpleGridState::new(
@@ -147,6 +134,35 @@ mod tests {
             collection.map.insert(state_id, Box::new(state));
         });
 
+        // let state_id = 2 * parameters.max_x + 12;
+        // let state: SimpleGridState =
+        //     SimpleGridState::new(state_id, (2, 12), true, 10.0, device, parameters);
+        // collection.map.insert(state_id, Box::new(state));
+        let terminal_states = vec![
+            ((6, 7), 15.0),
+            ((2, 5), 12.0),
+            ((3, 9), 25.0),
+            ((8, 2), 12.0),
+            ((9, 2), 12.0),
+            ((7, 2), 12.0),
+            ((10, 5), 12.0),
+            ((9, 5), 12.0),
+            ((8, 5), 24.0),
+            ((9, 8), 12.0),
+            ((9, 7), 16.0),
+            ((9, 6), 12.0),
+            ((6, 11), 12.0)
+        ];
+
+        terminal_states.into_iter().for_each(|((x, y), r)| {
+            let state_id = x * parameters.max_x + y;
+            let state: SimpleGridState =
+                SimpleGridState::new(state_id, (x, y), true, r, device, parameters);
+            collection.map.insert(state_id, Box::new(state));
+        });
+
+
+
         let model = SimpleGridModel::new(device, parameters).unwrap();
 
         let mut sampler = SimpleGridSampler::new();
@@ -168,7 +184,7 @@ mod tests {
             sampler.trajectories.clear();
             sampler.sample_trajectories(&mut config);
 
-            (0..20).for_each(|j| {
+            (0..50).for_each(|j| {
                 let mut losses = Vec::<_>::new();
                 // let mut losses_sum = Vec::<_>::new();
                 sampler.trajectories.iter().for_each(|traj| {
