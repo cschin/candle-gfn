@@ -13,8 +13,7 @@ pub struct SimpleGridParameters {
     pub max_x: u32,
     pub max_y: u32,
     pub number_trajectories: u32,
-    pub terminate_states: Vec<(u32, u32)>,
-    pub rewards: FxHashMap<(u32, u32), f32>,
+    pub rewards: Vec<((u32, u32), f32)>,
 }
 
 pub struct SimpleGridModel<'a, P> {
@@ -84,10 +83,10 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters> {
     }
     fn reverse_ss_flow(
         &self,
-        source: &impl StateTrait<(u32, u32)>,
-        sink: &impl StateTrait<(u32, u32)>,
+        _source: &impl StateTrait<(u32, u32)>,
+        _sink: &impl StateTrait<(u32, u32)>,
     ) -> Result<Tensor> {
-        todo!()
+        unimplemented!() 
     }
 }
 
@@ -338,7 +337,7 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                 if t < state.reward / sump {
                     break;
                 } else {
-                    t -= state.reward / sump; 
+                    t -= state.reward / sump;
                 }
             }
             //println!("acc_sump: {:?} {}", acc_sump, t);
