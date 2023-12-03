@@ -1,12 +1,9 @@
 const VERSION_STRING: &str = env!("VERSION_STRING");
 use candle_core::{shape, Device, Tensor};
-use candle_gfn::trajectory;
 use candle_gfn::{model::ModelTrait, sampler::*, simple_grid_gfn::*};
 use candle_nn::*;
 use clap::{self, CommandFactory, Parser};
-use fxhash::*;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{self, Path};
@@ -73,30 +70,20 @@ fn main() -> Result<(), std::io::Error> {
     collection.map.insert(state_id, Box::new(state));
 
     (0..parameters.max_x).for_each(|idx| {
-        let state_id = idx * parameters.max_x + parameters.max_y - 1;
-        let state: SimpleGridState = SimpleGridState::new(
-            state_id,
-            (idx, parameters.max_y - 1),
-            true,
-            0.001,
-            device,
-            parameters,
-        );
-        collection.map.insert(state_id, Box::new(state));
+        (0..parameters.max_y).for_each(|idx2| {
+            let state_id = idx * parameters.max_x + idx2;
+            let state: SimpleGridState = SimpleGridState::new(
+                state_id,
+                (idx, idx2),
+                true,
+                0.1,
+                device,
+                parameters,
+            );
+            collection.map.insert(state_id, Box::new(state));
+        });
     });
 
-    (0..parameters.max_y).for_each(|idx| {
-        let state_id = (parameters.max_x - 1) * parameters.max_x + idx;
-        let state: SimpleGridState = SimpleGridState::new(
-            state_id,
-            (parameters.max_x - 1, idx),
-            true,
-            0.001,
-            device,
-            parameters,
-        );
-        collection.map.insert(state_id, Box::new(state));
-    });
 
     parameters.rewards.iter().for_each(|&((x, y), r)| {
         let state_id = x * parameters.max_x + y;
@@ -108,6 +95,7 @@ fn main() -> Result<(), std::io::Error> {
     let mut model = SimpleGridModel::new(device, parameters).unwrap();
 
     if let Some(model_file) = args.model_file {
+        println!("use model: {}", model_file);
         let _ = model.varmap.load(Path::new(&model_file));
     };
 
@@ -124,7 +112,7 @@ fn main() -> Result<(), std::io::Error> {
         parameters,
     };
 
-    let mut opt = candle_nn::SGD::new(model.varmap.all_vars(), 0.0005).unwrap();
+    let mut opt = candle_nn::SGD::new(model.varmap.all_vars(), 0.001).unwrap();
 
     let mut flow = FlowSpec {
         f0: vec![],
@@ -164,7 +152,7 @@ fn main() -> Result<(), std::io::Error> {
                     if s0.is_terminal {
                         let reward = s0.reward;
 
-                        let reward = Tensor::from_slice(&[reward; 1], (1, 1), device).unwrap();
+                        let reward = Tensor::new(&[[reward; 1]], device).unwrap();
                         out_flow.push(reward);
                     }
 
@@ -213,7 +201,7 @@ fn main() -> Result<(), std::io::Error> {
                                 in_flow.push(tmp);
                             });
                     }
-                    let tmp = Tensor::from_slice(&[0.001_f32; 1], (1, 1), device).unwrap();
+                    let tmp = Tensor::new(&[[0.001_f32; 1]], device).unwrap();
                     in_flow.push(tmp);
 
                     let in_flow = Tensor::stack(&in_flow[..], 0).unwrap();
@@ -228,19 +216,18 @@ fn main() -> Result<(), std::io::Error> {
             let losses = Tensor::stack(&losses[..], 0).unwrap().sum_all().unwrap();
             let _ = opt.backward_step(&losses);
             let loss_scalar: f32 = losses.reshape(shape::SCALAR).unwrap().to_scalar().unwrap();
-            let f0_scalar: f32 = model.get_f0().unwrap().reshape(shape::SCALAR).unwrap().to_scalar().unwrap();
+            let f0_scalar: f32 = model
+                .get_f0()
+                .unwrap()
+                .reshape(shape::SCALAR)
+                .unwrap()
+                .to_scalar()
+                .unwrap();
             println!(
                 "batch {} {}, total loss: {} {}",
-                batch_idx,
-                cycle_idx,
-                loss_scalar,
-                f0_scalar 
+                batch_idx, cycle_idx, loss_scalar, f0_scalar
             );
-            flow.loss.push((
-                batch_idx,
-                cycle_idx,
-                loss_scalar
-            ));
+            flow.loss.push((batch_idx, cycle_idx, loss_scalar));
         });
 
         if args.save_all_batches || batch_idx == args.number_of_batches - 1 {
