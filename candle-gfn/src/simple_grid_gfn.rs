@@ -70,7 +70,7 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters> {
         // let xs = xs.relu()?;
         // let xs = self.ln2.forward(&xs)?.exp()?;
         let mut id = source.get_id() << 1;
-        if source.get_data().0 == sink.get_data().1 {
+        if source.get_data().0 != sink.get_data().0 {
             id += 1;
         };
         let ids = Tensor::new(&[id], self.device)?;
@@ -363,13 +363,13 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
         let number_trajectories = config.parameters.number_trajectories;
         (0..number_trajectories).for_each(|_| {
             let trajectory = self.sample_a_new_trajectory(config);
-            trajectory
-                .get_parent_offspring_pairs()
-                .iter()
-                .for_each(|&(s0id, s1id)| {
-                    self.offsprings.entry(s0id).or_default().push(s1id);
-                    self.parents.entry(s1id).or_default().push(s0id);
-                });
+            // trajectory
+            //     .get_parent_offspring_pairs()
+            //     .iter()
+            //     .for_each(|&(s0id, s1id)| {
+            //         self.offsprings.entry(s0id).or_default().push(s1id);
+            //         self.parents.entry(s1id).or_default().push(s0id);
+            //     });
             self.trajectories.push(trajectory);
         });
     }
