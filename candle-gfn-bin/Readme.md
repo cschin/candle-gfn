@@ -29,4 +29,14 @@ bash run_example.sh
 The results are dump in JSON and SafeTensor format. I will
 add a Jupyer Notebook for analyzing the results.
 
+TODOs
+====================
+
+1. Currently it is hardcoded to use CUDA device, make it configurable.
+2. We have not put any effort to optimize the tensor operations yet.
+3. Implement Detail Balance / Trajectory Balance objective functions.
+4. Build less trivial models with the code base.
+
+
+
 Dec. 2023, Jason
