@@ -19,8 +19,12 @@ mod tests {
         let c = (0u32, 0u32);
         let mut state_id = 0_u32;
         use candle_core::Device;
-        //let device = &Device::new_cuda(0).expect("no cuda device available");
-        let device = &Device::Cpu;
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 64,
             max_y: 64,
@@ -45,8 +49,12 @@ mod tests {
         let c = (0u32, 0u32);
         let mut state_id = 0_u32;
         use candle_core::Device;
-        //let device = Device::new_cuda(0).expect("no cuda device available");
-        let device = &Device::Cpu;
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 64,
             max_y: 64,
@@ -74,8 +82,12 @@ mod tests {
         use candle_core::Device;
         use model::*;
         use simple_grid_gfn::*;
-        //let device = Device::new_cuda(0).expect("no cuda device available");
-        let device = &Device::Cpu;
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 64,
             max_y: 64,
@@ -99,8 +111,12 @@ mod tests {
         let c = (0u32, 0u32);
 
         let state_id = 0_u32;
-        //let device = &Device::new_cuda(0).expect("no cuda device available");
-        let device = &Device::Cpu;
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 12,
             max_y: 12,
