@@ -19,19 +19,25 @@ mod tests {
         let c = (0u32, 0u32);
         let mut state_id = 0_u32;
         use candle_core::Device;
-        let device = Device::new_cuda(0).expect("no cuda device available");
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 64,
             max_y: 64,
             number_trajectories: 1000,
-            rewards: vec![]
+            rewards: vec![],
+            device
         };
-        let state: SimpleGridState = SimpleGridState::new(0, c, false, 0.0001, &device, parameters);
+        let state: SimpleGridState = SimpleGridState::new(0, c, false, 0.0001,  parameters);
         let collection = &mut SimpleGridStateCollection::default();
         collection.map.insert(state_id, Box::new(state));
         let mdp = SimpleGridMDP::new();
 
-        while let Some(s) = mdp.mdp_next_one_uniform(state_id, collection, &device, parameters) {
+        while let Some(s) = mdp.mdp_next_one_uniform(state_id, collection, parameters) {
             println!("state_id: {:?}", s);
             state_id = s;
         }
@@ -43,21 +49,27 @@ mod tests {
         let c = (0u32, 0u32);
         let mut state_id = 0_u32;
         use candle_core::Device;
-        let device = Device::new_cuda(0).expect("no cuda device available");
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 64,
             max_y: 64,
             number_trajectories: 200,
-            rewards: vec![]
+            rewards: vec![],
+            device
         };
-        let state: SimpleGridState = SimpleGridState::new(0, c, false, 0.0, &device, parameters);
+        let state: SimpleGridState = SimpleGridState::new(0, c, false, 0.0,  parameters);
         let collection = &mut SimpleGridStateCollection::default();
         let mut traj = trajectory::Trajectory::new();
         traj.push(state_id);
         collection.map.insert(state_id, Box::new(state));
         let mdp = SimpleGridMDP::new();
 
-        while let Some(s) = mdp.mdp_next_one_uniform(state_id, collection, &device, parameters) {
+        while let Some(s) = mdp.mdp_next_one_uniform(state_id, collection,  parameters) {
             println!("state_id: {:?}", s);
             state_id = s;
             traj.push(state_id);
@@ -70,16 +82,22 @@ mod tests {
         use candle_core::Device;
         use model::*;
         use simple_grid_gfn::*;
-        let device = Device::new_cuda(0).expect("no cuda device available");
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 64,
             max_y: 64,
             number_trajectories: 1000,
-            rewards: vec![]
+            rewards: vec![],
+            device
         };
-        let s0 = SimpleGridState::new(0, (0, 0), false, 0.0, &device, parameters);
-        let s1 = SimpleGridState::new(1, (1, 1), false, 0.0, &device, parameters);
-        let model = SimpleGridModel::new(&device, parameters).unwrap();
+        let s0 = SimpleGridState::new(0, (0, 0), false, 0.0,  parameters);
+        let s1 = SimpleGridState::new(1, (1, 1), false, 0.0,  parameters);
+        let model = SimpleGridModel::new( parameters).unwrap();
         let out = model.forward_ss_flow(&s0, &s1).unwrap();
         println!("{:?} {}", out, out);
     }
@@ -93,7 +111,12 @@ mod tests {
         let c = (0u32, 0u32);
 
         let state_id = 0_u32;
-        let device = &Device::new_cuda(0).expect("no cuda device available");
+        let device = if cfg!(feature = "cuda") {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu
+        };
+        let device = &device;
         let parameters = &SimpleGridParameters {
             max_x: 12,
             max_y: 12,
@@ -110,9 +133,10 @@ mod tests {
             ((9, 8), 12.0),
             ((9, 7), 16.0),
             ((9, 6), 12.0),
-            ((6, 11), 12.0)]
+            ((6, 11), 12.0)],
+            device
         };
-        let state: SimpleGridState = SimpleGridState::new(0, c, false, 0.0, device, parameters);
+        let state: SimpleGridState = SimpleGridState::new(0, c, false, 0.0, parameters);
         let collection = &mut SimpleGridStateCollection::default();
         collection.map.insert(state_id, Box::new(state));
 
@@ -123,7 +147,6 @@ mod tests {
                 (idx, parameters.max_y - 1),
                 true,
                 0.001,
-                device,
                 parameters,
             );
             collection.map.insert(state_id, Box::new(state));
@@ -136,7 +159,6 @@ mod tests {
                 (parameters.max_x - 1, idx),
                 true,
                 0.001,
-                device,
                 parameters,
             );
             collection.map.insert(state_id, Box::new(state));
@@ -150,13 +172,13 @@ mod tests {
         parameters.rewards.iter().for_each(|&((x, y), r)| {
             let state_id = x * parameters.max_x + y;
             let state: SimpleGridState =
-                SimpleGridState::new(state_id, (x, y), true, r, device, parameters);
+                SimpleGridState::new(state_id, (x, y), true, r, parameters);
             collection.map.insert(state_id, Box::new(state));
         });
 
 
 
-        let model = SimpleGridModel::new(device, parameters).unwrap();
+        let model = SimpleGridModel::new(parameters).unwrap();
 
         let mut sampler = SimpleGridSampler::new();
 
@@ -200,7 +222,6 @@ mod tests {
                         if let Some(next_state_ids) = config.mdp.mdp_next_possible_states(
                             state_id,
                             config.collection,
-                            device,
                             parameters,
                         ) {
                             next_state_ids.into_iter().for_each(|next_state_id| {
@@ -230,7 +251,6 @@ mod tests {
                         if let Some(previous_state_ids) = config.mdp.mdp_previous_possible_states(
                             state_id,
                             config.collection,
-                            device,
                             parameters,
                         ) {
                             previous_state_ids

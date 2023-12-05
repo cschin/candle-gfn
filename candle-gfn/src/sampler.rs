@@ -6,33 +6,29 @@ use candle_core::Device;
 use crate::state::{StateCollection, StateIdType};
 use crate::trajectory::Trajectory;
 
-pub trait MDPTrait<I, S, D, P> {
+pub trait MDPTrait<I, S, P> {
     fn mdp_next_possible_states(
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
-        device: &D,
         parameters: &P,
     ) -> Option<Vec<I>>;
     fn mdp_next_one_uniform(
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
-        device: &D,
         parameters: &P,
     ) -> Option<I>;
     fn mdp_previous_possible_states(
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
-        device: &D,
         parameters: &P,
     ) -> Option<Vec<I>>;
     fn mdp_previous_one_uniform(
         &self,
         state_id: I,
         collection: &mut StateCollection<I, S>,
-        device: &D,
         parameters: &P,
     ) -> Option<I>;
 

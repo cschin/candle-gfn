@@ -58,14 +58,20 @@ fn main() -> Result<(), std::io::Error> {
     let spec: GridSpec = serde_json::from_reader(spec_file)?;
 
     let state_id = 0_u32;
-    let device = &Device::new_cuda(0).expect("no cuda device available");
+    let device = if cfg!(feature = "cuda") {
+        Device::new_cuda(0).expect("no cuda device available")
+    } else {
+        Device::Cpu
+    };
+    let device = &device;
     let parameters = &SimpleGridParameters {
         max_x: spec.max_x,
         max_y: spec.max_y,
         number_trajectories: args.batch_size as u32,
         rewards: spec.rewards,
+        device
     };
-    let state: SimpleGridState = SimpleGridState::new(0, (0, 0), false, 0.0, device, parameters);
+    let state: SimpleGridState = SimpleGridState::new(0, (0, 0), false, 0.0, parameters);
     let collection = &mut SimpleGridStateCollection::default();
     collection.map.insert(state_id, Box::new(state));
 
@@ -77,7 +83,6 @@ fn main() -> Result<(), std::io::Error> {
                 (idx, idx2),
                 true,
                 0.1,
-                device,
                 parameters,
             );
             collection.map.insert(state_id, Box::new(state));
@@ -88,11 +93,11 @@ fn main() -> Result<(), std::io::Error> {
     parameters.rewards.iter().for_each(|&((x, y), r)| {
         let state_id = x * parameters.max_x + y;
         let state: SimpleGridState =
-            SimpleGridState::new(state_id, (x, y), true, r, device, parameters);
+            SimpleGridState::new(state_id, (x, y), true, r, parameters);
         collection.map.insert(state_id, Box::new(state));
     });
 
-    let mut model = SimpleGridModel::new(device, parameters).unwrap();
+    let mut model = SimpleGridModel::new(parameters).unwrap();
 
     if let Some(model_file) = args.model_file {
         println!("use model: {}", model_file);
@@ -159,7 +164,6 @@ fn main() -> Result<(), std::io::Error> {
                     if let Some(next_state_ids) = config.mdp.mdp_next_possible_states(
                         state_id,
                         config.collection,
-                        device,
                         parameters,
                     ) {
                         next_state_ids.into_iter().for_each(|next_state_id| {
@@ -184,7 +188,6 @@ fn main() -> Result<(), std::io::Error> {
                     if let Some(previous_state_ids) = config.mdp.mdp_previous_possible_states(
                         state_id,
                         config.collection,
-                        device,
                         parameters,
                     ) {
                         previous_state_ids
