@@ -162,7 +162,6 @@ impl<'a> MDPTrait<StateIdType, SimpleGridState, SimpleGridParameters<'a>> for Si
         parameters: &SimpleGridParameters,
     ) -> Option<Vec<StateIdType>> {
         let state = collection.map.get(&state_id).expect("can get the stat");
-        let device = parameters.device;
         let coordinate = state.data;
         let max_x = parameters.max_x;
         let max_y = parameters.max_y;
@@ -206,7 +205,6 @@ impl<'a> MDPTrait<StateIdType, SimpleGridState, SimpleGridParameters<'a>> for Si
         parameters: &SimpleGridParameters,
     ) -> Option<StateIdType> {
         let mut rng = rand::thread_rng();
-        let device = parameters.device;
         self.mdp_next_possible_states(state_id, collection, parameters)
             .map(|states| states[rng.gen::<usize>().rem_euclid(states.len())])
     }
@@ -259,7 +257,6 @@ impl<'a> MDPTrait<StateIdType, SimpleGridState, SimpleGridParameters<'a>> for Si
         parameters: &SimpleGridParameters,
     ) -> Option<StateIdType> {
         let mut rng = rand::thread_rng();
-        let device = parameters.device;
         self.mdp_previous_possible_states(state_id, collection, parameters)
             .map(|states| states[rng.gen::<usize>().rem_euclid(states.len())])
     }
@@ -283,7 +280,6 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
         let collection = &mut config.collection;
         let model = config.model;
         let mdp = &mut config.mdp;
-        let device = config.device;
         let parameters = config.parameters;
 
         let mut traj = Trajectory::new();
