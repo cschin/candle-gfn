@@ -8,7 +8,6 @@ pub mod trajectory;
 mod tests {
 
     use candle_core::Tensor;
-    use fxhash::FxHashMap;
 
     use crate::sampler::{MDPTrait, Sampling};
 

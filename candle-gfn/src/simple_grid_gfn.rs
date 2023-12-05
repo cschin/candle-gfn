@@ -4,8 +4,7 @@ use crate::state::{State, StateCollection, StateIdType, StateTrait};
 use crate::trajectory::Trajectory;
 use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
-use candle_nn::{Linear, Module, VarBuilder, VarMap};
-use fxhash::FxHashMap;
+use candle_nn::{VarBuilder, VarMap};
 use rand::{self, Rng};
 
 #[derive(Clone)]
@@ -32,11 +31,11 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters<'a>> {
         let device = parameter.device;
         let varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&varmap, DType::F32, device);
-        let in_d: usize = (parameter.max_x * parameter.max_y * 2) as usize;
-        let out_d = 1_usize; // a simple score of log p
-                             //let ln1 = candle_nn::linear(in_d, 128, vb.pp("ln1"))?;
-                             //let ln2 = candle_nn::linear(128, out_d, vb.pp("ln2"))?;
-        let f0 = vb
+        //let in_d: usize = (parameter.max_x * parameter.max_y * 2) as usize;
+        //let out_d = 1_usize; // a simple score of log p
+        //let ln1 = candle_nn::linear(in_d, 128, vb.pp("ln1"))?;
+        //let ln2 = candle_nn::linear(128, out_d, vb.pp("ln2"))?;
+let f0 = vb
             .get_with_hints((1, 1), "f0", candle_nn::Init::Const(0.0))
             .unwrap();
         let values = vb
@@ -53,7 +52,7 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters<'a>> {
             f0,
             values,
             varmap,
-            parameter: parameter,
+            parameter,
         })
     }
 }
