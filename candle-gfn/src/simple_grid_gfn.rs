@@ -14,7 +14,6 @@ pub struct SimpleGridParameters<'a> {
     pub number_trajectories: u32,
     pub rewards: Vec<((u32, u32), f32)>,
     pub device: &'a Device,
-
 }
 
 pub struct SimpleGridModel<'a, P> {
@@ -22,6 +21,7 @@ pub struct SimpleGridModel<'a, P> {
     //ln2: Linear,
     f0: Tensor,
     values: Tensor,
+    f: Tensor,
     pub varmap: VarMap,
     parameter: &'a P,
 }
@@ -35,13 +35,21 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters<'a>> {
         //let out_d = 1_usize; // a simple score of log p
         //let ln1 = candle_nn::linear(in_d, 128, vb.pp("ln1"))?;
         //let ln2 = candle_nn::linear(128, out_d, vb.pp("ln2"))?;
-let f0 = vb
-            .get_with_hints((1, 1), "f0", candle_nn::Init::Const(0.0))
+        let f0 = vb
+            .get_with_hints((1, 1), "f0", candle_nn::Init::Const(5.0))
             .unwrap();
         let values = vb
             .get_with_hints(
-                ((parameter.max_x * parameter.max_y * 2) as usize, 1_usize),
+                ((parameter.max_x * parameter.max_y) as usize, 1_usize),
                 "values",
+                candle_nn::Init::default(),
+            )
+            .unwrap();
+
+        let f = vb
+            .get_with_hints(
+                ((parameter.max_x * parameter.max_y) as usize, 1_usize),
+                "f",
                 candle_nn::Init::default(),
             )
             .unwrap();
@@ -51,6 +59,7 @@ let f0 = vb
             //ln2,
             f0,
             values,
+            f,
             varmap,
             parameter,
         })
@@ -69,15 +78,17 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters<'a>
         // let xs = self.ln1.forward(&inputs)?.detach()?;
         // let xs = xs.relu()?;
         // let xs = self.ln2.forward(&xs)?.exp()?;
-        let mut id = source.get_id() << 1;
-        if source.get_data().0 != sink.get_data().0 {
-            id += 1;
-        };
+        let source_id = source.get_id();
+        let sink_id = sink.get_id();
         let device = self.parameter.device;
-        let ids = Tensor::new(&[id], device)?;
-        let xs = self.values.embedding(&ids)?.exp()?;
+        let source_id = Tensor::new(&[source_id], device)?;
+        let sink_id = Tensor::new(&[sink_id], device)?;
+        let sink_score = self.values.embedding(&sink_id)?;
+        let beta = self.f.embedding(&source_id)?; 
+        
+        let out_tensor = self.values.embedding(&source_id)?.sub(&sink_score)?.add(&beta)?.exp()?;
         //println!("DDD {} {}", ids, xs);
-        Ok(xs)
+        Ok(out_tensor)
     }
     fn get_f0(&self) -> Result<Tensor> {
         Ok(self.f0.exp()?)
@@ -87,7 +98,7 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters<'a>
         _source: &impl StateTrait<(u32, u32)>,
         _sink: &impl StateTrait<(u32, u32)>,
     ) -> Result<Tensor> {
-        unimplemented!() 
+        unimplemented!()
     }
 }
 
@@ -179,13 +190,7 @@ impl<'a> MDPTrait<StateIdType, SimpleGridState, SimpleGridParameters<'a>> for Si
             if collection.map.contains_key(&id) {
                 next_states.push(id);
             } else {
-                let new_state = Box::new(SimpleGridState::new(
-                    id,
-                    (x, y),
-                    false,
-                    0.0,
-                    parameters,
-                ));
+                let new_state = Box::new(SimpleGridState::new(id, (x, y), false, 0.0, parameters));
                 collection.map.entry(id).or_insert(new_state);
                 next_states.push(id);
             }
@@ -231,13 +236,7 @@ impl<'a> MDPTrait<StateIdType, SimpleGridState, SimpleGridParameters<'a>> for Si
             if collection.map.contains_key(&id) {
                 next_states.push(id);
             } else {
-                let new_state = Box::new(SimpleGridState::new(
-                    id,
-                    (x, y),
-                    false,
-                    0.0,
-                    parameters,
-                ));
+                let new_state = Box::new(SimpleGridState::new(id, (x, y), false, 0.0, parameters));
                 collection.map.entry(id).or_insert(new_state);
                 next_states.push(id);
             }
@@ -287,8 +286,7 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
         let model = model.unwrap();
         let mut rng = rand::thread_rng();
 
-        while let Some(next_states) =
-            mdp.mdp_next_possible_states(state_id, collection, parameters)
+        while let Some(next_states) = mdp.mdp_next_possible_states(state_id, collection, parameters)
         {
             let state_and_flow = next_states
                 .into_iter()
@@ -310,7 +308,6 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                 break;
             };
 
-            // let inv_temp: f32 = 5.0;
             let mut sump: f32 = state_and_flow.iter().map(|v| v.1).sum();
             let state = collection.map.get(&state_id).unwrap().as_ref();
             if state.is_terminal {
