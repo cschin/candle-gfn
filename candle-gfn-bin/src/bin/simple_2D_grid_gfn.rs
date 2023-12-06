@@ -26,6 +26,8 @@ struct CmdOptions {
     number_of_batches: usize,
     #[clap(long, short, default_value_t = false)]
     save_all_batches: bool,
+    #[clap(long, short, default_value_t = 0.0001)]
+    learning_rate: f64,
 }
 
 #[allow(dead_code)] // need the standard names for deserialization if they are not use
@@ -117,7 +119,7 @@ fn main() -> Result<(), std::io::Error> {
         parameters,
     };
 
-    let mut opt = candle_nn::SGD::new(model.varmap.all_vars(), 0.001).unwrap();
+    let mut opt = candle_nn::SGD::new(model.varmap.all_vars(), args.learning_rate).unwrap();
 
     let mut flow = FlowSpec {
         f0: vec![],
