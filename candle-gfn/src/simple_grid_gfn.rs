@@ -1,3 +1,5 @@
+use std::iter::Sum;
+
 use crate::model::ModelTrait;
 use crate::sampler::{MDPTrait, Sampler, Sampling, SamplingConfiguration, MDP};
 use crate::state::{State, StateCollection, StateIdType, StateTrait};
@@ -38,11 +40,13 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters<'a>> {
         let f0 = vb
             .get_with_hints((1, 1), "f0", candle_nn::Init::Const(5.0))
             .unwrap();
+        let hint = candle_nn::Init::Randn { mean: 0.0, stdev: 0.05 };
+        // let hint = candle_nn::Init::default();
         let values = vb
             .get_with_hints(
                 ((parameter.max_x * parameter.max_y) as usize, 1_usize),
                 "values",
-                candle_nn::Init::default(),
+                hint,
             )
             .unwrap();
 
@@ -50,7 +54,7 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters<'a>> {
             .get_with_hints(
                 ((parameter.max_x * parameter.max_y) as usize, 1_usize),
                 "f",
-                candle_nn::Init::default(),
+                hint,
             )
             .unwrap();
         //println!("all vars: {:?}", varmap.data());
@@ -84,14 +88,66 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters<'a>
         let source_id = Tensor::new(&[source_id], device)?;
         let sink_id = Tensor::new(&[sink_id], device)?;
         let sink_score = self.values.embedding(&sink_id)?;
-        let beta = self.f.embedding(&source_id)?; 
-        
-        let out_tensor = self.values.embedding(&source_id)?.sub(&sink_score)?.add(&beta)?.exp()?;
+        let flow = self.f.embedding(&source_id)?;
+
+        let out_tensor = self
+            .values
+            .embedding(&source_id)?
+            .sub(&sink_score)?
+            .add(&flow)?
+            .exp()?;
         //println!("DDD {} {}", ids, xs);
         Ok(out_tensor)
     }
-    fn get_f0(&self) -> Result<Tensor> {
-        Ok(self.f0.exp()?)
+    fn get_f0(&self) -> Result<&Tensor> {
+        Ok(&self.f0)
+    }
+
+    fn forward_ss_flow_batch(
+        &self,
+        ss_pairs: &[(StateIdType, StateIdType)],
+        batch_size: usize,
+    ) -> Result<Tensor> {
+        let mut source_ids = Vec::<u32>::new();
+        let mut sink_ids = Vec::<u32>::new();
+        ss_pairs.iter().for_each(|&(s, t)| {
+            source_ids.push(s);
+            sink_ids.push(t);
+        });
+        let device = self.parameter.device;
+
+        let mut out_tensors = Vec::<_>::new();
+        (0..ss_pairs.len())
+            .step_by(batch_size)
+            .try_for_each(|start_idx| -> Result<()> {
+                let end_idx = if start_idx + batch_size < ss_pairs.len() {
+                    start_idx + batch_size
+                } else {
+                    ss_pairs.len()
+                };
+
+                let batch_source_ids = Tensor::new(&source_ids[start_idx..end_idx], device)?;
+                let batch_sink_ids = Tensor::new(&sink_ids[start_idx..end_idx], device)?;
+                let sink_score = self.values.embedding(&batch_sink_ids)?;
+                let flow = self.f.embedding(&batch_source_ids)?;
+                let out_tensor = self
+                    .values
+                    .embedding(&batch_source_ids)?
+                    .sub(&sink_score)?
+                    .add(&flow)?
+                    .exp()?;
+                out_tensors.push(out_tensor);
+                Ok(())
+            })?;
+        Ok(Tensor::cat(&out_tensors, 0)?)
+    }
+
+    fn reverse_ss_flow_batch(
+        &self,
+        ss_p: &[(StateIdType, StateIdType)],
+        batch_size: usize,
+    ) -> Result<Tensor> {
+        unimplemented!()
     }
     fn reverse_ss_flow(
         &self,

@@ -1,9 +1,11 @@
 const VERSION_STRING: &str = env!("VERSION_STRING");
-use candle_core::{shape, Device, Tensor};
+use candle_core::{shape, Device, IndexOp, Tensor, WithDType, D};
+use candle_gfn::state::StateIdType;
 use candle_gfn::{model::ModelTrait, sampler::*, simple_grid_gfn::*};
 use candle_nn::*;
 use clap::{self, CommandFactory, Parser};
-use serde::{Deserialize, Serialize};
+use fxhash::{FxHashMap, FxHashSet};
+use serde::{de, Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{self, Path};
@@ -71,7 +73,7 @@ fn main() -> Result<(), std::io::Error> {
         max_y: spec.max_y,
         number_trajectories: args.batch_size as u32,
         rewards: spec.rewards,
-        device
+        device,
     };
     let state: SimpleGridState = SimpleGridState::new(0, (0, 0), false, 0.0, parameters);
     let collection = &mut SimpleGridStateCollection::default();
@@ -80,22 +82,15 @@ fn main() -> Result<(), std::io::Error> {
     (0..parameters.max_x).for_each(|idx| {
         (0..parameters.max_y).for_each(|idx2| {
             let state_id = idx * parameters.max_x + idx2;
-            let state: SimpleGridState = SimpleGridState::new(
-                state_id,
-                (idx, idx2),
-                true,
-                0.1,
-                parameters,
-            );
+            let state: SimpleGridState =
+                SimpleGridState::new(state_id, (idx, idx2), true, 0.1, parameters);
             collection.map.insert(state_id, Box::new(state));
         });
     });
 
-
     parameters.rewards.iter().for_each(|&((x, y), r)| {
         let state_id = x * parameters.max_x + y;
-        let state: SimpleGridState =
-            SimpleGridState::new(state_id, (x, y), true, r, parameters);
+        let state: SimpleGridState = SimpleGridState::new(state_id, (x, y), true, r, parameters);
         collection.map.insert(state_id, Box::new(state));
     });
 
@@ -147,75 +142,128 @@ fn main() -> Result<(), std::io::Error> {
             });
         };
 
-        (0..args.opt_cycles).for_each(|cycle_idx| {
-            let mut losses = Vec::<_>::new();
-            sampler.trajectories.iter().for_each(|traj| {
-                let trajectory = &traj.trajectory;
+        let mut visited = FxHashMap::<StateIdType, usize>::default();
+        let mut flow_set = FxHashSet::<(StateIdType, StateIdType)>::default();
 
-                trajectory.iter().for_each(|&state_id| {
-                    let mut out_flow = Vec::<_>::new();
-                    let s0 = config.collection.map.get(&state_id).unwrap().as_ref();
-
-                    if s0.is_terminal {
-                        let reward = s0.reward;
-
-                        let reward = Tensor::new(&[[reward; 1]], device).unwrap();
-                        out_flow.push(reward);
-                    }
-
-                    if let Some(next_state_ids) = config.mdp.mdp_next_possible_states(
-                        state_id,
-                        config.collection,
-                        parameters,
-                    ) {
-                        next_state_ids.into_iter().for_each(|next_state_id| {
-                            let s0 = config.collection.map.get(&state_id).unwrap().as_ref();
-                            let s1 = config.collection.map.get(&next_state_id).unwrap().as_ref();
-                            let tmp = model.forward_ss_flow(s0, s1).unwrap();
-                            out_flow.push(tmp);
+        sampler.trajectories.iter().for_each(|traj| {
+            let trajectory = &traj.trajectory;
+            trajectory.iter().for_each(|&state_id| {
+                *visited.entry(state_id).or_default() += 1;
+                if let Some(next_state_ids) =
+                    config
+                        .mdp
+                        .mdp_next_possible_states(state_id, config.collection, parameters)
+                {
+                    next_state_ids.into_iter().for_each(|next_state_id| {
+                        flow_set.insert((state_id, next_state_id));
+                    });
+                }
+                if let Some(previous_state_ids) =
+                    config
+                        .mdp
+                        .mdp_previous_possible_states(state_id, config.collection, parameters)
+                {
+                    previous_state_ids
+                        .into_iter()
+                        .for_each(|previous_state_id| {
+                            flow_set.insert((previous_state_id, state_id));
                         });
+                }
+            });
+        });
+
+        let mut flow_set_out = FxHashMap::<StateIdType, Vec<StateIdType>>::default();
+        let mut flow_set_in = FxHashMap::<StateIdType, Vec<StateIdType>>::default();
+
+        flow_set.iter().for_each(|&(s_from, s_to)| {
+            flow_set_out.entry(s_from).or_default().push(s_to);
+            flow_set_in.entry(s_to).or_default().push(s_from);
+        });
+        let mut ss_pairs = Vec::<(StateIdType, StateIdType)>::new();
+        let flow_set = flow_set
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (s_from, s_to))| {
+                ss_pairs.push((s_from, s_to));
+                ((s_from, s_to), idx)
+            })
+            .collect::<FxHashMap<(StateIdType, StateIdType), usize>>();
+
+        (0..args.opt_cycles).for_each(|cycle_idx| {
+            let mut losses: Vec<Tensor> = Vec::new();
+            let flow_tensor = model.forward_ss_flow_batch(&ss_pairs, 512).unwrap();
+
+            visited.iter().for_each(|(&state_id, count)| {
+                let out_flow_idx = if let Some(out_flow) = flow_set_out.get(&state_id) {
+                    out_flow
+                        .iter()
+                        .map(|&s_to| *flow_set.get(&(state_id, s_to)).unwrap() as u32)
+                        .collect::<Vec<u32>>()
+                } else {
+                    vec![]
+                };
+                let in_flow_idx = if let Some(in_flow) = flow_set_in.get(&state_id) {
+                    in_flow
+                        .iter()
+                        .map(|&s_from| *flow_set.get(&(s_from, state_id)).unwrap() as u32)
+                        .collect::<Vec<u32>>()
+                } else {
+                    vec![]
+                };
+                let out_flow_idx_len = out_flow_idx.len();
+                let in_flow_idx_len = in_flow_idx.len();
+                let mut loss = Tensor::new(&[0.0f32], device).unwrap();
+                let s0 = config.collection.map.get(&state_id).unwrap();
+                if out_flow_idx_len > 0 || s0.is_terminal {
+                    let mut out_flow_sum = Tensor::new(&[0.0f32], device).unwrap();
+                    if out_flow_idx_len > 0 {
+                        let out_flow_idx =
+                            Tensor::from_vec(out_flow_idx, out_flow_idx_len, device).unwrap();
+                        let out_flow = flow_tensor
+                            .i(&out_flow_idx)
+                            .unwrap()
+                            .sum_all()
+                            .unwrap()
+                            .flatten_all()
+                            .unwrap();
+                        out_flow_sum = out_flow_sum.add(&out_flow).unwrap();
                     }
-                    let tmp = Tensor::from_slice(&[0.001_f32; 1], (1, 1), device).unwrap();
-                    out_flow.push(tmp);
+                    if s0.is_terminal {
+                        let reward = Tensor::new(&[s0.reward], device).unwrap();
+                        out_flow_sum = out_flow_sum.add(&reward).unwrap();
+                    };
+                    out_flow_sum = out_flow_sum.log().unwrap();
+                    loss = loss.add(&out_flow_sum).unwrap();
+                    // println!("outflow {}", out_flow_sum);
+                }
 
-                    let out_flow = Tensor::stack(&out_flow[..], 0).unwrap();
-                    let out_flow = out_flow.sum_all().unwrap();
-                    let out_flow = out_flow.log().unwrap();
-
-                    let mut in_flow = Vec::<_>::new();
+                if in_flow_idx_len > 0 || state_id == 0 {
+                    let mut in_flow_sum = Tensor::new(&[0.0f32], device).unwrap();
+                    if in_flow_idx_len > 0 {
+                        let in_flow_idx =
+                            Tensor::from_vec(in_flow_idx, in_flow_idx_len, device).unwrap();
+                        let in_flow = flow_tensor
+                            .i(&in_flow_idx)
+                            .unwrap()
+                            .sum_all()
+                            .unwrap()
+                            .flatten_all()
+                            .unwrap();
+                        in_flow_sum = in_flow_sum.add(&in_flow).unwrap();
+                    }
                     if state_id == 0 {
-                        in_flow.push(model.get_f0().unwrap());
+                        let f0 = model.get_f0().unwrap().flatten_all().unwrap();
+                        in_flow_sum = in_flow_sum.add(&f0).unwrap();
                     }
+                    in_flow_sum = in_flow_sum.log().unwrap();
+                    loss = loss.sub(&in_flow_sum).unwrap();
+                    // println!("inflow {}", in_flow_sum);
+                }
+                let count = Tensor::new(&[*count as f32], device).unwrap();
+                loss = loss.sqr().unwrap().mul(&count).unwrap();
 
-                    if let Some(previous_state_ids) = config.mdp.mdp_previous_possible_states(
-                        state_id,
-                        config.collection,
-                        parameters,
-                    ) {
-                        previous_state_ids
-                            .into_iter()
-                            .for_each(|previous_state_id| {
-                                let s0 = config.collection.map.get(&state_id).unwrap().as_ref();
-                                let s1 = config
-                                    .collection
-                                    .map
-                                    .get(&previous_state_id)
-                                    .unwrap()
-                                    .as_ref();
-                                let tmp = model.forward_ss_flow(s1, s0).unwrap();
-                                in_flow.push(tmp);
-                            });
-                    }
-                    let tmp = Tensor::new(&[[0.001_f32; 1]], device).unwrap();
-                    in_flow.push(tmp);
-
-                    let in_flow = Tensor::stack(&in_flow[..], 0).unwrap();
-                    let in_flow = in_flow.sum_all().unwrap();
-                    let in_flow = in_flow.log().unwrap();
-                    let loss_at_s = out_flow.sub(&in_flow).unwrap().sqr().unwrap();
-
-                    losses.push(loss_at_s);
-                });
+                // println!("loss {}", loss);
+                losses.push(loss);
             });
 
             let losses = Tensor::stack(&losses[..], 0).unwrap().sum_all().unwrap();
