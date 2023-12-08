@@ -244,7 +244,7 @@ mod tests {
 
                         let mut in_flow = Vec::<_>::new();
                         if state_id == 0 {
-                            in_flow.push(model.get_f0().unwrap());
+                            in_flow.push(model.get_f0().unwrap().clone());
                         }
 
                         if let Some(previous_state_ids) = config.mdp.mdp_previous_possible_states(

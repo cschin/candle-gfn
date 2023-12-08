@@ -30,6 +30,8 @@ struct CmdOptions {
     save_all_batches: bool,
     #[clap(long, short, default_value_t = 0.0001)]
     learning_rate: f64,
+    #[clap(long, short, default_value_t = false)]
+    cuda: bool,
 }
 
 #[allow(dead_code)] // need the standard names for deserialization if they are not use
@@ -63,7 +65,11 @@ fn main() -> Result<(), std::io::Error> {
 
     let state_id = 0_u32;
     let device = if cfg!(feature = "cuda") {
-        Device::new_cuda(0).expect("no cuda device available")
+        if args.cuda {
+            Device::new_cuda(0).expect("no cuda device available")
+        } else {
+            Device::Cpu 
+        }
     } else {
         Device::Cpu
     };
