@@ -5,7 +5,7 @@ use candle_gfn::{model::ModelTrait, sampler::*, simple_grid_gfn::*};
 use candle_nn::*;
 use clap::{self, CommandFactory, Parser};
 use fxhash::{FxHashMap, FxHashSet};
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{self, Path};
@@ -85,14 +85,14 @@ fn main() -> Result<(), std::io::Error> {
     let collection = &mut SimpleGridStateCollection::default();
     collection.map.insert(state_id, Box::new(state));
 
-    (0..parameters.max_x).for_each(|idx| {
-        (0..parameters.max_y).for_each(|idx2| {
-            let state_id = idx * parameters.max_x + idx2;
-            let state: SimpleGridState =
-                SimpleGridState::new(state_id, (idx, idx2), true, 0.1, parameters);
-            collection.map.insert(state_id, Box::new(state));
-        });
-    });
+    // (0..parameters.max_x).for_each(|idx| {
+    //     (0..parameters.max_y).for_each(|idx2| {
+    //         let state_id = idx * parameters.max_x + idx2;
+    //         let state: SimpleGridState =
+    //             SimpleGridState::new(state_id, (idx, idx2), true, 0.1, parameters);
+    //         collection.map.insert(state_id, Box::new(state));
+    //     });
+    // });
 
     parameters.rewards.iter().for_each(|&((x, y), r)| {
         let state_id = x * parameters.max_x + y;
@@ -351,29 +351,30 @@ fn main() -> Result<(), std::io::Error> {
                     }
                 });
             });
+            let mut flow_file = BufWriter::new(
+                File::create(path::Path::new(&args.output_prefix).with_extension("flow"))
+                    .expect("can't create the output flow file"),
+            );
+    
+            let flow = serde_json::to_string(&flow).unwrap();
+            let _ = flow_file.write_all(flow.as_bytes());
+    
+            let mut traj_file = BufWriter::new(
+                File::create(path::Path::new(&args.output_prefix).with_extension("traj"))
+                    .expect("can't create the output traj file"),
+            );
+    
+            let out_traj = serde_json::to_string(&out_traj).unwrap();
+            let _ = traj_file.write_all(out_traj.as_bytes());
+    
+            //println!("varmap: {:?}", config.model.unwrap().varmap.all_vars());
+            let _ = config
+                .model
+                .unwrap()
+                .varmap
+                .save(path::Path::new(&args.output_prefix).with_extension("safetensors"));
         };
-        let mut flow_file = BufWriter::new(
-            File::create(path::Path::new(&args.output_prefix).with_extension("flow"))
-                .expect("can't create the output flow file"),
-        );
-
-        let flow = serde_json::to_string(&flow).unwrap();
-        let _ = flow_file.write_all(flow.as_bytes());
-
-        let mut traj_file = BufWriter::new(
-            File::create(path::Path::new(&args.output_prefix).with_extension("traj"))
-                .expect("can't create the output traj file"),
-        );
-
-        let out_traj = serde_json::to_string(&out_traj).unwrap();
-        let _ = traj_file.write_all(out_traj.as_bytes());
-
-        //println!("varmap: {:?}", config.model.unwrap().varmap.all_vars());
-        let _ = config
-            .model
-            .unwrap()
-            .varmap
-            .save(path::Path::new(&args.output_prefix).with_extension("safetensors"));
+        
     });
     Ok(())
 }
