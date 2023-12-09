@@ -1,5 +1,5 @@
 const VERSION_STRING: &str = env!("VERSION_STRING");
-use candle_core::{shape, Device, IndexOp, Tensor, WithDType, D};
+use candle_core::{shape, Device, IndexOp, Tensor};
 use candle_gfn::state::StateIdType;
 use candle_gfn::{model::ModelTrait, sampler::*, simple_grid_gfn::*};
 use candle_nn::*;
