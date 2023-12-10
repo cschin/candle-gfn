@@ -1,5 +1,3 @@
-use std::iter::Sum;
-
 use crate::model::ModelTrait;
 use crate::sampler::{MDPTrait, Sampler, Sampling, SamplingConfiguration, MDP};
 use crate::state::{State, StateCollection, StateIdType, StateTrait};
