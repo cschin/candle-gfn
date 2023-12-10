@@ -145,8 +145,8 @@ impl<'a> ModelTrait<(u32, u32)> for SimpleGridModel<'a, SimpleGridParameters<'a>
 
     fn reverse_ss_flow_batch(
         &self,
-        ss_p: &[(StateIdType, StateIdType)],
-        batch_size: usize,
+        _ss_p: &[(StateIdType, StateIdType)],
+        _batch_size: usize,
     ) -> Result<Tensor> {
         unimplemented!()
     }
@@ -345,7 +345,6 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
             traj.push(state_id);
             let model = model.unwrap();
             let mut rng = rand::thread_rng();
-            let mut is_terminated = false;
             while let Some(next_states) =
                 mdp.mdp_next_possible_states(state_id, collection, parameters)
             {
@@ -386,7 +385,6 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                 let mut updated = false;
                 if state.is_terminal {
                     if t < state.reward / sump {
-                        is_terminated = true;
                         break;
                     } else {
                         t -= state.reward / sump;
@@ -407,7 +405,10 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
                     traj.push(state_id);
                 }
             }
-            if is_terminated {break};
+            let state = collection.map.get(&state_id).unwrap().as_ref();
+            if state.is_terminal {
+                break;
+            };
         }
         //println!("traj: {:?}", traj.trajectory);
         traj
