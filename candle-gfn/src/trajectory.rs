@@ -15,6 +15,10 @@ impl<I: Copy> Trajectory<I> {
         Self { trajectory }
     }
 
+    pub fn clear(&mut self) {
+        self.trajectory.clear();
+    }
+
     pub fn get_parent_offspring_pairs(&self) -> Vec<(I, I)> {
         assert!(self.trajectory.len() > 1);
         (0..self.trajectory.len() - 1)

@@ -40,7 +40,10 @@ impl<'a> SimpleGridModel<'a, SimpleGridParameters<'a>> {
         let f0 = vb
             .get_with_hints((1, 1), "f0", candle_nn::Init::Const(5.0))
             .unwrap();
-        let hint = candle_nn::Init::Randn { mean: 0.0, stdev: 0.05 };
+        let hint = candle_nn::Init::Randn {
+            mean: 0.0,
+            stdev: 0.05,
+        };
         // let hint = candle_nn::Init::default();
         let values = vb
             .get_with_hints(
@@ -337,69 +340,76 @@ impl<'a> Sampling<StateIdType, SimpleGridSamplingConfiguration<'a>> for SimpleGr
         let parameters = config.parameters;
 
         let mut traj = Trajectory::new();
-        let mut state_id = begin;
-        traj.push(state_id);
-        let model = model.unwrap();
-        let mut rng = rand::thread_rng();
 
-        while let Some(next_states) = mdp.mdp_next_possible_states(state_id, collection, parameters)
-        {
-            let state_and_flow = next_states
-                .into_iter()
-                .map(|sid| {
-                    let s0 = collection.map.get(&state_id).unwrap().as_ref();
-                    let s1 = collection.map.get(&sid).unwrap().as_ref();
-                    let p = model
-                        .forward_ss_flow(s0, s1)
-                        .unwrap()
-                        .flatten_all()
-                        .unwrap()
-                        .get(0)
-                        .unwrap();
-                    //println!("{:?}", p);
-                    (sid, p.to_scalar::<f32>().unwrap())
-                })
-                .collect::<Vec<_>>();
-            if state_and_flow.is_empty() {
-                break;
-            };
-
-            let mut sump: f32 = state_and_flow.iter().map(|v| v.1).sum();
-            let state = collection.map.get(&state_id).unwrap().as_ref();
-            if state.is_terminal {
-                sump += state.reward;
-            }
-
-            let mut acc_sump = Vec::new();
-            //let epsilon: f32 = 0.05;
-            let mut th = 0.0f32;
-            state_and_flow.iter().for_each(|(id, p)| {
-                th += p / sump;
-                acc_sump.push((*id, th))
-            });
-            let mut t = rng.gen::<f32>();
-            let mut updated = false;
-            if state.is_terminal {
-                if t < state.reward / sump {
+        loop {
+            traj.clear();
+            let mut state_id = begin;
+            traj.push(state_id);
+            let model = model.unwrap();
+            let mut rng = rand::thread_rng();
+            let mut is_terminated = false;
+            while let Some(next_states) =
+                mdp.mdp_next_possible_states(state_id, collection, parameters)
+            {
+                let state_and_flow = next_states
+                    .into_iter()
+                    .map(|sid| {
+                        let s0 = collection.map.get(&state_id).unwrap().as_ref();
+                        let s1 = collection.map.get(&sid).unwrap().as_ref();
+                        let p = model
+                            .forward_ss_flow(s0, s1)
+                            .unwrap()
+                            .flatten_all()
+                            .unwrap()
+                            .get(0)
+                            .unwrap();
+                        //println!("{:?}", p);
+                        (sid, p.to_scalar::<f32>().unwrap())
+                    })
+                    .collect::<Vec<_>>();
+                if state_and_flow.is_empty() {
                     break;
-                } else {
-                    t -= state.reward / sump;
+                };
+
+                let mut sump: f32 = state_and_flow.iter().map(|v| v.1).sum();
+                let state = collection.map.get(&state_id).unwrap().as_ref();
+                if state.is_terminal {
+                    sump += state.reward;
                 }
-            }
-            //println!("acc_sump: {:?} {}", acc_sump, t);
-            for (id, th) in acc_sump {
-                if t < th {
-                    state_id = id;
+
+                let mut acc_sump = Vec::new();
+                //let epsilon: f32 = 0.05;
+                let mut th = 0.0f32;
+                state_and_flow.iter().for_each(|(id, p)| {
+                    th += p / sump;
+                    acc_sump.push((*id, th))
+                });
+                let mut t = rng.gen::<f32>();
+                let mut updated = false;
+                if state.is_terminal {
+                    if t < state.reward / sump {
+                        is_terminated = true;
+                        break;
+                    } else {
+                        t -= state.reward / sump;
+                    }
+                }
+                //println!("acc_sump: {:?} {}", acc_sump, t);
+                for (id, th) in acc_sump {
+                    if t < th {
+                        state_id = id;
+                        traj.push(state_id);
+                        updated = true;
+                        break;
+                    }
+                }
+                if !updated {
+                    let d = state_and_flow[rng.gen::<usize>().rem_euclid(state_and_flow.len())];
+                    state_id = d.0;
                     traj.push(state_id);
-                    updated = true;
-                    break;
                 }
             }
-            if !updated {
-                let d = state_and_flow[rng.gen::<usize>().rem_euclid(state_and_flow.len())];
-                state_id = d.0;
-                traj.push(state_id);
-            }
+            if is_terminated {break};
         }
         //println!("traj: {:?}", traj.trajectory);
         traj
