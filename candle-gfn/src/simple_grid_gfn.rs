@@ -531,7 +531,7 @@ mod tests {
         use crate::model::ModelTrait;
         use candle_core::Device;
         use candle_nn::*;
-        use crate::*;
+
         let c = (0u32, 0u32);
 
         let state_id = 0_u32;
