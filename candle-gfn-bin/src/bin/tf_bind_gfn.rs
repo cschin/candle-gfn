@@ -12,7 +12,7 @@ use std::path::{self, Path};
 
 /// Align long contigs and identify potential SV regions with respect to the reference fasta file
 #[derive(Parser, Debug)]
-#[clap(name = "simple_2D_grid_gfn")]
+#[clap(name = "tf_bind_gfn")]
 #[clap(author, version)]
 #[clap(about, long_about = None)]
 struct CmdOptions {
