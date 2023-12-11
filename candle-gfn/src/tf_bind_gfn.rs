@@ -22,6 +22,7 @@ pub struct TFParameters<'a> {
 pub struct TFModel<'a, P> {
     ln1: Linear,
     ln2: Linear,
+    ln3: Linear,
     f0: Tensor,
     pub varmap: VarMap,
     parameter: &'a P,
@@ -34,14 +35,16 @@ impl<'a> TFModel<'a, TFParameters<'a>> {
         let vb = VarBuilder::from_varmap(&varmap, DType::F32, device);
         let in_d: usize = (parameter.size * 3) as usize;
         let out_d = 2_usize; // a simple score of log p
-        let ln1 = candle_nn::linear(in_d, 128, vb.pp("ln1"))?;
-        let ln2 = candle_nn::linear(128, out_d, vb.pp("ln2"))?;
+        let ln1 = candle_nn::linear(in_d, 256, vb.pp("ln1"))?;
+        let ln2 = candle_nn::linear(256, 256, vb.pp("ln2"))?;
+        let ln3 = candle_nn::linear(256, out_d, vb.pp("ln3"))?;
         let f0 = vb
-            .get_with_hints((1, 1), "f0", candle_nn::Init::Const(5.0))
+            .get_with_hints((1, 1), "f0", candle_nn::Init::Const(1000.0))
             .unwrap();
         Ok(Self {
             ln1,
             ln2,
+            ln3,
             f0,
             varmap,
             parameter,
@@ -61,11 +64,15 @@ impl<'a> ModelTrait<MerStateDateType> for TFModel<'a, TFParameters<'a>> {
 
         let source_out = self.ln1.forward(source_tensor)?.detach()?;
         let source_out = source_out.relu()?;
-        let source_out = self.ln2.forward(&source_out)?.exp()?;
+        let source_out = self.ln2.forward(&source_out)?.detach()?;
+        let source_out = source_out.relu()?;
+        let source_out = self.ln3.forward(&source_out)?.exp()?;
 
         let sink_out = self.ln1.forward(sink_tensor)?.detach()?;
         let sink_out = sink_out.relu()?;
-        let sink_out = self.ln2.forward(&sink_out)?.exp()?;
+        let sink_out = self.ln2.forward(&sink_out)?.detach()?;
+        let sink_out = sink_out.relu()?;
+        let sink_out = self.ln3.forward(&sink_out)?.exp()?;
 
         let idx_0 = Tensor::new(&[0u32; 1], device)?;
         let idx_1 = Tensor::new(&[1u32; 1], device)?;
@@ -114,11 +121,15 @@ impl<'a> ModelTrait<MerStateDateType> for TFModel<'a, TFParameters<'a>> {
 
                 let source_out = self.ln1.forward(&source_tensors)?.detach()?;
                 let source_out = source_out.relu()?;
-                let source_out = self.ln2.forward(&source_out)?.exp()?;
+                let source_out = self.ln2.forward(&source_out)?.detach()?;
+                let source_out = source_out.relu()?;
+                let source_out = self.ln3.forward(&source_out)?.exp()?;
 
                 let sink_out = self.ln1.forward(&sink_tensors)?.detach()?;
                 let sink_out = sink_out.relu()?;
-                let sink_out = self.ln2.forward(&sink_out)?.exp()?;
+                let sink_out = self.ln2.forward(&sink_out)?.detach()?;
+                let sink_out = sink_out.relu()?;
+                let sink_out = self.ln3.forward(&sink_out)?.exp()?;
 
                 let idx_0 = Tensor::new(&[0u32; 1], device)?;
                 let idx_1 = Tensor::new(&[1u32; 1], device)?;
@@ -331,10 +342,9 @@ impl<'a> MDPTrait<StateIdType, MerState, TFParameters<'a>> for MerMDP {
             .expect("can get the stat")
             .get_data();
 
-
         if state_data.is_empty() {
             return None;
-        } 
+        }
         let mut pre_states = Vec::<StateIdType>::new();
         let pre_state = Vec::from(&state_data[0..state_data.len() - 1]);
 

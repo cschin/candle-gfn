@@ -1,4 +1,5 @@
 const VERSION_STRING: &str = env!("VERSION_STRING");
+use candle_core::shape::SCALAR;
 use candle_core::{shape, Device, IndexOp, Tensor};
 use candle_gfn::state::StateIdType;
 use candle_gfn::{model::ModelTrait, sampler::*, tf_bind_gfn::*};
@@ -46,7 +47,7 @@ struct TFSpec {
 struct FlowSpec {
     f0: Vec<(usize, f32)>,
     loss: Vec<(usize, usize, f32)>,
-    flow: Vec<(usize, String, String, f32)>,
+    inflow: Vec<(usize, String, f32)>,
 }
 
 #[allow(dead_code)] // need the standard names for deserialization if they are not use
@@ -86,7 +87,7 @@ fn main() -> Result<(), std::io::Error> {
             }
             b'T' => {
                 v.push(0b11);
-            },
+            }
             _ => {}
         });
         v
@@ -97,18 +98,17 @@ fn main() -> Result<(), std::io::Error> {
         s.iter().for_each(|b| match b {
             0b00 => {
                 v.push(b'A');
-            },
+            }
             0b01 => {
                 v.push(b'C');
-            },
+            }
             0b10 => {
                 v.push(b'G');
-            },
+            }
             0b11 => {
                 v.push(b'T');
-            },
+            }
             _ => {}
-
         });
         String::from_utf8_lossy(&v[..]).to_string()
     };
@@ -175,7 +175,7 @@ fn main() -> Result<(), std::io::Error> {
     let mut flow = FlowSpec {
         f0: vec![],
         loss: vec![],
-        flow: vec![],
+        inflow: vec![],
     };
 
     let mut out_traj = TrajSpec {
@@ -241,7 +241,7 @@ fn main() -> Result<(), std::io::Error> {
             .enumerate()
             .map(|(idx, (s_from, s_to))| {
                 let state_from = config.collection.map.get(&s_from).unwrap();
-                let state_to = config.collection.map.get(&s_from).unwrap();
+                let state_to = config.collection.map.get(&s_to).unwrap();
                 ss_pairs.push((state_from, state_to));
                 ((s_from, s_to), idx)
             })
@@ -249,7 +249,9 @@ fn main() -> Result<(), std::io::Error> {
 
         (0..args.opt_cycles).for_each(|cycle_idx| {
             let mut losses: Vec<Tensor> = Vec::new();
-            let flow_tensor = model.forward_ss_flow_batch_with_states(&ss_pairs, 512).unwrap();
+            let flow_tensor = model
+                .forward_ss_flow_batch_with_states(&ss_pairs, 512)
+                .unwrap();
 
             visited.iter().for_each(|(&state_id, count)| {
                 let out_flow_idx = if let Some(out_flow) = flow_set_out.get(&state_id) {
@@ -341,6 +343,7 @@ fn main() -> Result<(), std::io::Error> {
             flow.loss.push((batch_idx, cycle_idx, loss_scalar));
         });
 
+        // write output
         if args.save_all_batches || batch_idx == args.number_of_batches - 1 {
             let f0: f32 = model
                 .get_f0()
@@ -353,8 +356,49 @@ fn main() -> Result<(), std::io::Error> {
                 .unwrap();
             flow.f0.push((batch_idx, f0));
 
+            flow.inflow = (0..(1 << 16) as u32)
+                .map(|n| {
+                    let state = (0..8)
+                        .map(|i| ((n >> (i * 2)) & 0b11) as u8)
+                        .collect::<Vec<u8>>();
+                    let state_id = get_id_from_mer(&state);
+                    let in_flow = if config.collection.map.contains_key(&state_id) {
+                        let mut in_flow = 0.0f32;
+                        if let Some(previous_state_ids) = config.mdp.mdp_previous_possible_states(
+                            state_id,
+                            config.collection,
+                            parameters,
+                        ) {
+                            let state = config.collection.map.get(&state_id).unwrap().as_ref();
+                            previous_state_ids
+                                .into_iter()
+                                .for_each(|previous_state_id| {
+                                    let p_state = config
+                                        .collection
+                                        .map
+                                        .get(&previous_state_id)
+                                        .unwrap()
+                                        .as_ref();
+                                    let flow = model
+                                        .forward_ss_flow(p_state, state)
+                                        .unwrap()
+                                        .reshape(SCALAR)
+                                        .unwrap()
+                                        .to_vec0::<f32>()
+                                        .unwrap();
+                                    in_flow += flow;
+                                });
+                        }
+                        in_flow
+                    } else {
+                        0.0f32
+                    };
+                    (batch_idx, vec_to_kmer(&state), in_flow)
+                })
+                .collect::<Vec<_>>();
+
             //println!("F0:{}",f0);
-            
+
             let mut flow_file = BufWriter::new(
                 File::create(path::Path::new(&args.output_prefix).with_extension("flow"))
                     .expect("can't create the output flow file"),
