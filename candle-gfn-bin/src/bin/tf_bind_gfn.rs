@@ -93,24 +93,24 @@ fn main() -> Result<(), std::io::Error> {
     };
 
     let vec_to_kmer = |s: &[u8]| -> String {
-        let mut v = Vec::<char>::new();
+        let mut v = Vec::<u8>::new();
         s.iter().for_each(|b| match b {
             0b00 => {
-                v.push('A');
+                v.push(b'A');
             },
             0b01 => {
-                v.push('C');
+                v.push(b'C');
             },
             0b10 => {
-                v.push('G');
+                v.push(b'G');
             },
             0b11 => {
-                v.push('T');
+                v.push(b'T');
             },
             _ => {}
 
         });
-        String::from_utf8_lossy(s).to_string()
+        String::from_utf8_lossy(&v[..]).to_string()
     };
 
     let mut rewards = FxHashMap::<Vec<u8>, f32>::default();
