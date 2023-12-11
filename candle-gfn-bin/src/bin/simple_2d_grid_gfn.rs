@@ -42,6 +42,7 @@ struct GridSpec {
     rewards: Vec<((u32, u32), f32)>,
 }
 
+#[allow(clippy::type_complexity)]
 #[allow(dead_code)] // need the standard names for deserialization if they are not use
 #[derive(Serialize, Clone, Debug)]
 struct FlowSpec {
