@@ -1,4 +1,3 @@
-
 use crate::model::ModelTrait;
 use crate::sampler::{MDPTrait, Sampler, Sampling, SamplingConfiguration, MDP};
 use crate::state::{State, StateCollection, StateIdType, StateTrait};
@@ -293,7 +292,7 @@ impl<'a> MDPTrait<StateIdType, MerState, TFParameters<'a>> for MerMDP {
                 let new_state = Box::new(MerState::new(
                     new_state_id,
                     &new_state,
-                    false, // temp hack 
+                    false, // temp hack
                     0.0,
                     parameters,
                 ));
@@ -301,7 +300,6 @@ impl<'a> MDPTrait<StateIdType, MerState, TFParameters<'a>> for MerMDP {
                 next_states.push(new_state_id);
             }
         });
-
 
         if next_states.is_empty() {
             None
@@ -325,10 +323,58 @@ impl<'a> MDPTrait<StateIdType, MerState, TFParameters<'a>> for MerMDP {
         &self,
         state_id: StateIdType,
         collection: &mut MerStateCollection,
-        _parameters: &TFParameters,
+        parameters: &TFParameters,
     ) -> Option<Vec<StateIdType>> {
-        let _state = collection.map.get(&state_id).expect("can get the stat");
-        unimplemented!()
+        let state_data = collection
+            .map
+            .get(&state_id)
+            .expect("can get the stat")
+            .get_data();
+
+
+        if state_data.is_empty() {
+            return None;
+        } 
+        let mut pre_states = Vec::<StateIdType>::new();
+        let pre_state = Vec::from(&state_data[0..state_data.len() - 1]);
+
+        let pre_state_id = get_id_from_mer(&pre_state);
+        if collection.map.contains_key(&pre_state_id) {
+            pre_states.push(pre_state_id);
+        } else {
+            let pre_state = Box::new(MerState::new(
+                pre_state_id,
+                &pre_state,
+                false, // temp hack
+                0.0,
+                parameters,
+            ));
+            collection.map.entry(pre_state_id).or_insert(pre_state);
+            pre_states.push(pre_state_id);
+        }
+
+        let pre_state = Vec::from(&state_data[1..state_data.len()]);
+
+        let pre_state_id = get_id_from_mer(&pre_state);
+        if collection.map.contains_key(&pre_state_id) {
+            pre_states.push(pre_state_id);
+        } else {
+            let pre_state = Box::new(MerState::new(
+                pre_state_id,
+                &pre_state,
+                false, // temp hack
+                0.0,
+                parameters,
+            ));
+            collection.map.entry(pre_state_id).or_insert(pre_state);
+            pre_states.push(pre_state_id);
+        }
+
+        if pre_states.is_empty() {
+            None
+        } else {
+            Some(pre_states)
+        }
     }
 
     fn mdp_previous_one_uniform(
@@ -459,7 +505,6 @@ impl<'a> Sampling<StateIdType, TFSamplingConfiguration<'a>> for TFSampler {
 #[cfg(test)]
 mod tests {
 
-
     use crate::sampler::MDPTrait;
 
     use super::*;
@@ -507,7 +552,6 @@ mod tests {
 
     #[test]
     fn generate_trajectory() {
-
         use crate::sampler::Sampling;
 
         use super::*;
@@ -533,20 +577,14 @@ mod tests {
         collection.map.insert(mer_id, Box::new(m_state));
         let mdp = &mut MerMDP::new();
 
-        (0..(1<<16) as u32).for_each(|n| {
-            let state = (0..8).map(|i|{
-                ((n >> (i*2)) & 0b11) as u8
-            }).collect::<Vec<u8>>();
+        (0..(1 << 16) as u32).for_each(|n| {
+            let state = (0..8)
+                .map(|i| ((n >> (i * 2)) & 0b11) as u8)
+                .collect::<Vec<u8>>();
             let new_state_id = get_id_from_mer(&state);
-            let new_state = Box::new(MerState::new(
-                new_state_id,
-                &state,
-                true,
-                0.0,
-                parameters,
-            ));
+            let new_state = Box::new(MerState::new(new_state_id, &state, true, 0.0, parameters));
             collection.map.entry(new_state_id).or_insert(new_state);
-        }); 
+        });
 
         let mut config = TFSamplingConfiguration {
             begin: 0,
@@ -561,7 +599,5 @@ mod tests {
         sampler.trajectories.clear();
         sampler.sample_trajectories(&mut config);
         println!("{:?}", sampler.trajectories.len());
-
     }
-
 }

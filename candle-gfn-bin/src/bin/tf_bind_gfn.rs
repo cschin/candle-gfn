@@ -235,19 +235,21 @@ fn main() -> Result<(), std::io::Error> {
             flow_set_out.entry(s_from).or_default().push(s_to);
             flow_set_in.entry(s_to).or_default().push(s_from);
         });
-        let mut ss_pairs = Vec::<(StateIdType, StateIdType)>::new();
+        let mut ss_pairs = Vec::<(&MerState, &MerState)>::new();
         let flow_set = flow_set
             .into_iter()
             .enumerate()
             .map(|(idx, (s_from, s_to))| {
-                ss_pairs.push((s_from, s_to));
+                let state_from = config.collection.map.get(&s_from).unwrap();
+                let state_to = config.collection.map.get(&s_from).unwrap();
+                ss_pairs.push((state_from, state_to));
                 ((s_from, s_to), idx)
             })
             .collect::<FxHashMap<(StateIdType, StateIdType), usize>>();
 
         (0..args.opt_cycles).for_each(|cycle_idx| {
             let mut losses: Vec<Tensor> = Vec::new();
-            let flow_tensor = model.forward_ss_flow_batch(&ss_pairs, 512).unwrap();
+            let flow_tensor = model.forward_ss_flow_batch_with_states(&ss_pairs, 512).unwrap();
 
             visited.iter().for_each(|(&state_id, count)| {
                 let out_flow_idx = if let Some(out_flow) = flow_set_out.get(&state_id) {
